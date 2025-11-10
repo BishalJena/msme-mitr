@@ -1,23 +1,22 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useChat } from '@ai-sdk/react';
+import React, { useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useOfflineMode } from "@/hooks/useOfflineMode";
-import { OfflineModeMessage, NetworkStatusBadge } from "@/components/ui/network-status";
+import { OfflineModeMessage } from "@/components/ui/network-status";
 import { useChatVoiceInput } from "@/hooks/useVoiceRecording";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { SchemeCard } from "@/components/chat/SchemeCard";
+import { useConversationStore } from "@/hooks/useConversationStore";
 import {
   Send,
   Mic,
   Sparkles,
   Paperclip,
-  Bot,
   Loader2,
   Square,
   HelpCircle,
@@ -25,21 +24,6 @@ import {
   FileText,
   TrendingUp,
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 interface QuickPrompt {
@@ -76,44 +60,119 @@ const quickPrompts: QuickPrompt[] = [
   },
 ];
 
-// Available models from OpenRouter
-const availableModels = [
-  { id: 'anthropic/claude-3-haiku', name: 'Claude Haiku (Fast)', category: 'Efficient' },
-  { id: 'anthropic/claude-3-sonnet', name: 'Claude Sonnet', category: 'Balanced' },
-  { id: 'openai/gpt-3.5-turbo', name: 'GPT-3.5 Turbo', category: 'Fast' },
-  { id: 'meta-llama/llama-3-70b-instruct', name: 'Llama 3 70B', category: 'Open' },
-];
+export interface ChatInterfaceStreamProps {
+  language?: string;
+  userProfile?: any;
+  onConversationChange?: (conversationId: string | null) => void;
+  newChatTrigger?: number;
+  selectedChatId?: string | null;
+}
 
 export function ChatInterfaceStream({
   language = "en",
-  userProfile = {}
-}: {
-  language?: string;
-  userProfile?: any;
-}) {
-  const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku');
-  const [sessionId, setSessionId] = useState<string>('');
+  userProfile = {},
+  onConversationChange,
+  newChatTrigger = 0,
+  selectedChatId,
+}: ChatInterfaceStreamProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const { isOfflineMode, getOfflineResponse, status } = useOfflineMode();
+  const { isOfflineMode } = useOfflineMode();
   const isHindi = language === "hi";
+
+  // Use conversation store instead of direct useChat
+  const store = useConversationStore({
+    language,
+    userProfile,
+    onConversationChange,
+  });
+
+  const {
+    conversation,
+    messages,
+    input,
+    setInput,
+    isLoading,
+    error,
+    sendMessage,
+    stop,
+    createNewConversation,
+    switchConversation,
+    messageCount,
+    limitWarning,
+  } = store;
 
   // Helper to extract text from AI SDK v5 message parts
   const getMessageText = (message: any): string => {
-    if (message.content) return message.content; // Fallback for old format
-    if (message.parts) {
-      return message.parts
-        .filter((part: any) => part.type === 'text')
-        .map((part: any) => part.text)
-        .join('');
+    // Direct string content (most common)
+    if (typeof message.content === 'string' && message.content) {
+      return message.content;
     }
+
+    // Text field (fallback)
+    if (typeof message.text === 'string' && message.text) {
+      return message.text;
+    }
+
+    // Parts array (AI SDK v5 format)
+    if (message.parts && Array.isArray(message.parts)) {
+      const text = message.parts
+        .filter((part: any) => part && (part.type === 'text' || part.text))
+        .map((part: any) => part.text || '')
+        .filter(Boolean)
+        .join('');
+      if (text) return text;
+    }
+
+    // Content array format
+    if (message.content && Array.isArray(message.content)) {
+      const text = message.content
+        .filter((c: any) => c && (c.type === 'text' || c.type === 'output_text' || c.type === 'input_text'))
+        .map((c: any) => c.text || c.content || '')
+        .filter(Boolean)
+        .join('');
+      if (text) return text;
+    }
+
+    console.warn('Unable to extract text from message:', message);
     return '';
   };
+
+  // Track if we're in the middle of creating a new conversation
+  const isCreatingNewRef = useRef(false);
+  const lastProcessedTriggerRef = useRef(0);
+
+  // Handle new chat trigger from parent component
+  useEffect(() => {
+    // Only process if trigger value changed and we're not already creating
+    if (
+      newChatTrigger > 0 &&
+      newChatTrigger !== lastProcessedTriggerRef.current &&
+      !isCreatingNewRef.current
+    ) {
+      lastProcessedTriggerRef.current = newChatTrigger;
+      isCreatingNewRef.current = true;
+      createNewConversation().finally(() => {
+        isCreatingNewRef.current = false;
+      });
+    }
+  }, [newChatTrigger, createNewConversation]);
+
+  // Handle conversation selection from sidebar
+  useEffect(() => {
+    // Don't switch if we're creating a new conversation
+    // Don't switch if the selected chat is already active
+    if (
+      selectedChatId &&
+      selectedChatId !== conversation?.id &&
+      !isCreatingNewRef.current
+    ) {
+      switchConversation(selectedChatId);
+    }
+  }, [selectedChatId, conversation?.id, switchConversation]);
 
   // Voice recording hook
   const voice = useChatVoiceInput((transcript) => {
     setInput(transcript);
-    // Optionally auto-send after transcription
     setTimeout(() => {
       const form = document.querySelector('form') as HTMLFormElement;
       if (form && transcript.trim()) {
@@ -122,108 +181,12 @@ export function ChatInterfaceStream({
     }, 100);
   });
 
-  // AI SDK v5: Manual input management
-  const [input, setInput] = useState('');
-
-  // Use the AI SDK's useChat hook for streaming
-  const {
-    messages,
-    status: chatStatus,
-    error,
-    stop,
-    setMessages,
-    sendMessage,
-  } = useChat({
-    api: '/api/chat',
-    body: {
-      sessionId,
-      language,
-      userProfile,
-      model: selectedModel,
-    },
-  });
-
-  // AI SDK v5 uses 'status' with values: 'ready', 'submitted', 'error'
-  const isLoading = chatStatus === 'submitted';
-
-  // Load session ID and fetch AI-generated welcome message on mount
-  useEffect(() => {
-    const savedSessionId = localStorage.getItem('chatSessionId');
-    if (savedSessionId) {
-      setSessionId(savedSessionId);
-    } else {
-      // Generate new session ID for new conversations
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      setSessionId(newSessionId);
-      localStorage.setItem('chatSessionId', newSessionId);
-    }
-
-    // Fetch AI-generated welcome message if no messages exist
-    if (messages.length === 0) {
-      // Check cache first (cache for 24 hours)
-      const cachedWelcome = localStorage.getItem(`welcomeMessage_${language}`);
-      const cacheTimestamp = localStorage.getItem(`welcomeMessageTime_${language}`);
-      const cacheAge = cacheTimestamp ? Date.now() - parseInt(cacheTimestamp) : Infinity;
-      const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-
-      if (cachedWelcome && cacheAge < CACHE_DURATION) {
-        // Use cached welcome message
-        setMessages([
-          {
-            id: 'welcome',
-            role: 'assistant',
-            content: cachedWelcome,
-          },
-        ]);
-      } else {
-        // Fetch new AI-generated welcome message
-        fetch('/api/chat/welcome', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ language }),
-        })
-          .then(res => res.json())
-          .then(data => {
-            const welcomeMessage = data.message;
-            setMessages([
-              {
-                id: 'welcome',
-                role: 'assistant',
-                content: welcomeMessage,
-              },
-            ]);
-
-            // Cache the welcome message
-            if (!data.fallback) {
-              localStorage.setItem(`welcomeMessage_${language}`, welcomeMessage);
-              localStorage.setItem(`welcomeMessageTime_${language}`, Date.now().toString());
-            }
-          })
-          .catch(err => {
-            console.error('Failed to fetch welcome message:', err);
-            // Fallback message
-            const fallbackMessage = isHindi
-              ? "नमस्ते! मैं MSME Mitr AI हूं, आपका व्यावसायिक सहायक। आज मैं आपकी कैसे मदद कर सकता हूं?"
-              : "Hello! I'm MSME Mitr AI, your business assistant. How can I help you today?";
-
-            setMessages([
-              {
-                id: 'welcome',
-                role: 'assistant',
-                content: fallbackMessage,
-              },
-            ]);
-          });
-      }
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Auto-scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Handle submit with offline mode support (AI SDK v5)
+  // Handle submit with offline mode support
   const handleSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -234,31 +197,31 @@ export function ChatInterfaceStream({
       toast.info('You appear to be offline. Message may not send.');
     }
 
-    // Always use AI SDK v5 sendMessage
-    // TODO: Pass sessionId, language, userProfile, model via headers or cookies
-    sendMessage({ text: input });
-    setInput('');
-  }, [input, isOfflineMode, messages, setMessages, getOfflineResponse, sendMessage, sessionId, language, userProfile, selectedModel]);
+    // Send via conversation store (handles persistence)
+    sendMessage(input);
+  }, [input, isOfflineMode, sendMessage]);
 
   // Handle quick prompt selection
   const handleQuickPrompt = useCallback((prompt: string) => {
     setInput(prompt);
     // Trigger form submission programmatically
-    const form = document.querySelector('form') as HTMLFormElement;
-    if (form) {
-      form.requestSubmit();
-    }
+    setTimeout(() => {
+      const form = document.querySelector('form') as HTMLFormElement;
+      if (form) {
+        form.requestSubmit();
+      }
+    }, 0);
   }, [setInput]);
-
-
-  // Handle model change
-  const handleModelChange = useCallback((model: string) => {
-    setSelectedModel(model);
-    toast.success(`Switched to ${model.split('/')[1]}`);
-  }, []);
 
   return (
     <div className="flex flex-col h-full bg-background">
+      {/* Limit warning */}
+      {limitWarning && (
+        <div className="m-4 p-2 bg-warning/10 border border-warning/20 rounded text-xs text-warning">
+          {limitWarning}
+        </div>
+      )}
+
       {/* Chat Messages Area */}
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
@@ -302,7 +265,7 @@ export function ChatInterfaceStream({
       </div>
 
       {/* Quick Prompts */}
-      {messages.length === 1 && (
+      {messages.length === 0 && (
         <div className="px-4 pb-4">
           <p className="text-xs text-muted-foreground mb-2">
             {isHindi ? "त्वरित प्रश्न" : "Quick questions"}
@@ -413,9 +376,6 @@ export function ChatInterfaceStream({
           {isHindi
             ? "12 भाषाओं में बात करें • तत्काल सहायता"
             : "Chat in 12 languages • Instant assistance"}
-          {selectedModel.includes('haiku') && (
-            <span className="ml-2 text-green-600">• Fast mode</span>
-          )}
         </p>
       </form>
     </div>

@@ -1,26 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { MobileLayout } from "@/components/layouts/MobileLayout";
 import { ChatInterfaceStream } from "@/components/mobile/ChatInterfaceStream";
 import { ChatSidebar } from "@/components/mobile/ChatSidebar";
-// import { EnhancedChatInterface } from "@/components/mobile/EnhancedChatInterface";
-// Note: EnhancedChatInterface requires AI SDK v3/v4. See docs/AI_SDK_MIGRATION.md
 
 export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Open by default on desktop
-  const [currentChatId, setCurrentChatId] = useState<string>("1");
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [newChatTrigger, setNewChatTrigger] = useState(0);
+  const prevChatIdRef = useRef<string | null>(null);
 
-  const handleNewChat = () => {
-    // Create new chat logic
-    console.log("Creating new chat...");
+  // Trigger sidebar refresh when chat ID actually changes
+  useEffect(() => {
+    if (currentChatId !== prevChatIdRef.current) {
+      prevChatIdRef.current = currentChatId;
+      setRefreshTrigger(prev => prev + 1);
+    }
+  }, [currentChatId]);
+
+  // Handle conversation change from ChatInterfaceStream
+  const handleConversationChange = useCallback((conversationId: string | null) => {
+    setCurrentChatId(conversationId);
+  }, []);
+
+  // Handle new chat (triggered by user clicking button)
+  const handleNewChat = useCallback(() => {
+    // Trigger new conversation creation in ChatInterfaceStream
+    setNewChatTrigger(prev => prev + 1);
     setIsSidebarOpen(false);
-  };
+  }, []);
 
-  const handleSelectChat = (chatId: string) => {
+  // Handle chat selection from sidebar
+  const handleSelectChat = useCallback((chatId: string) => {
     setCurrentChatId(chatId);
     setIsSidebarOpen(false);
-  };
+    // ChatInterfaceStream will load this conversation via key change
+  }, []);
 
   return (
     <MobileLayout className="p-0 overflow-hidden" onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}>
@@ -36,9 +53,10 @@ export default function Home() {
         >
           <ChatSidebar
             language="en"
-            currentChatId={currentChatId}
+            currentChatId={currentChatId || undefined}
             onNewChat={handleNewChat}
             onSelectChat={handleSelectChat}
+            refreshTrigger={refreshTrigger}
           />
         </aside>
 
@@ -52,8 +70,12 @@ export default function Home() {
 
         {/* Main Chat Area */}
         <div className="flex-1 min-w-0 h-full overflow-hidden">
-          <ChatInterfaceStream language="en" />
-          {/* <EnhancedChatInterface language="en" /> */}
+          <ChatInterfaceStream
+            language="en"
+            onConversationChange={handleConversationChange}
+            newChatTrigger={newChatTrigger}
+            selectedChatId={currentChatId}
+          />
         </div>
       </div>
     </MobileLayout>

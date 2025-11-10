@@ -3,7 +3,7 @@
  * Handles language selection and translations
  */
 
-import { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import {
   languageService,
   SupportedLanguage,
@@ -95,11 +95,9 @@ export function LanguageProvider({
     detectLanguage: languageService.detectLanguage
   };
 
-  return (
-    <LanguageContext.Provider value={value}>
-      {children}
-    </LanguageContext.Provider>
-  );
+  const Provider = LanguageContext.Provider as any;
+
+  return React.createElement(Provider, { value }, children);
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -10,6 +10,7 @@ import {
   Clock,
   Trash2,
   MoreVertical,
+  Pin,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -17,20 +18,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import Link from "next/link";
-
-interface ChatHistory {
-  id: string;
-  title: string;
-  lastMessage: string;
-  timestamp: Date;
-}
+import type { ConversationMetadata } from "@/types/conversation";
+import {
+  getConversationMetadata,
+  deleteConversation,
+  updateConversation,
+} from "@/lib/conversationStorage";
+import { toast } from "sonner";
 
 interface ChatSidebarProps {
   language?: string;
   onNewChat?: () => void;
   onSelectChat?: (chatId: string) => void;
   currentChatId?: string;
+  refreshTrigger?: number; // Optional prop to trigger refresh
 }
 
 export function ChatSidebar({
@@ -38,36 +50,27 @@ export function ChatSidebar({
   onNewChat,
   onSelectChat,
   currentChatId,
+  refreshTrigger,
 }: ChatSidebarProps) {
   const isHindi = language === "hi";
+  const [conversations, setConversations] = useState<ConversationMetadata[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
 
-  // Mock chat history - replace with actual data
-  const [chatHistory] = useState<ChatHistory[]>([
-    {
-      id: "1",
-      title: isHindi ? "PMEGP योजना के बारे में" : "About PMEGP Scheme",
-      lastMessage: isHindi
-        ? "मुझे PMEGP के लिए आवेदन करने में मदद करें"
-        : "Help me apply for PMEGP",
-      timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 mins ago
-    },
-    {
-      id: "2",
-      title: isHindi ? "व्यवसाय ऋण पात्रता" : "Business Loan Eligibility",
-      lastMessage: isHindi
-        ? "मैं किन योजनाओं के लिए पात्र हूं?"
-        : "What schemes am I eligible for?",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    },
-    {
-      id: "3",
-      title: isHindi ? "स्टार्टअप सब्सिडी" : "Startup Subsidy",
-      lastMessage: isHindi
-        ? "महिला उद्यमी योजनाएं बताएं"
-        : "Tell me about women entrepreneur schemes",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-    },
-  ]);
+  // Load conversations from storage
+  const loadConversations = () => {
+    const result = getConversationMetadata();
+    if (result.success) {
+      setConversations(result.data);
+    } else {
+      console.error('Failed to load conversations:', result.error);
+    }
+  };
+
+  // Load on mount and when refreshTrigger changes
+  useEffect(() => {
+    loadConversations();
+  }, [refreshTrigger]);
 
   const formatTimestamp = (date: Date) => {
     const now = Date.now();
@@ -76,7 +79,9 @@ export function ChatSidebar({
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
 
-    if (minutes < 60) {
+    if (minutes < 1) {
+      return isHindi ? "अभी" : "Now";
+    } else if (minutes < 60) {
       return isHindi ? `${minutes} मिनट पहले` : `${minutes}m ago`;
     } else if (hours < 24) {
       return isHindi ? `${hours} घंटे पहले` : `${hours}h ago`;
@@ -87,9 +92,42 @@ export function ChatSidebar({
     }
   };
 
-  const handleDeleteChat = (chatId: string) => {
-    // Implement delete logic
-    console.log("Delete chat:", chatId);
+  const handleDeleteClick = (chatId: string) => {
+    setConversationToDelete(chatId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!conversationToDelete) return;
+
+    const result = deleteConversation(conversationToDelete);
+    if (result.success) {
+      toast.success(isHindi ? 'चैट हटाई गई' : 'Chat deleted');
+      loadConversations();
+
+      // If deleting current chat, trigger new chat
+      if (conversationToDelete === currentChatId) {
+        onNewChat?.();
+      }
+    } else {
+      toast.error(result.error);
+    }
+
+    setDeleteDialogOpen(false);
+    setConversationToDelete(null);
+  };
+
+  const handleTogglePin = async (chatId: string, currentPinned: boolean) => {
+    const result = updateConversation(chatId, { isPinned: !currentPinned });
+    if (result.success) {
+      toast.success(currentPinned
+        ? (isHindi ? 'अनपिन किया गया' : 'Unpinned')
+        : (isHindi ? 'पिन किया गया' : 'Pinned')
+      );
+      loadConversations();
+    } else {
+      toast.error(result.error);
+    }
   };
 
   return (
@@ -132,71 +170,106 @@ export function ChatSidebar({
       {/* Chat History List */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 pb-4">
-          {chatHistory.map((chat) => (
-            <div
-              key={chat.id}
-              className={`
-                group relative rounded-lg transition-colors cursor-pointer
-                ${
-                  currentChatId === chat.id
-                    ? "bg-primary/10 border border-primary/20"
-                    : "hover:bg-muted/50"
-                }
-              `}
-              onClick={() => onSelectChat?.(chat.id)}
-            >
-              <div className="flex items-start gap-3 p-3">
-                <MessageSquare
-                  className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                    currentChatId === chat.id
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                />
-                <div className="flex-1 min-w-0">
-                  <h4
-                    className={`text-sm font-medium truncate ${
-                      currentChatId === chat.id ? "text-primary" : ""
-                    }`}
-                  >
-                    {chat.title}
-                  </h4>
-                  <p className="text-xs text-muted-foreground truncate mt-1">
-                    {chat.lastMessage}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {formatTimestamp(chat.timestamp)}
-                  </p>
-                </div>
-
-                {/* More Options */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteChat(chat.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {isHindi ? "हटाएं" : "Delete"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+          {conversations.length === 0 ? (
+            <div className="p-6 text-center text-muted-foreground">
+              <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">
+                {isHindi ? "कोई चैट नहीं" : "No conversations yet"}
+              </p>
+              <p className="text-xs mt-1">
+                {isHindi ? "नया चैट शुरू करें" : "Start a new chat to begin"}
+              </p>
             </div>
-          ))}
+          ) : (
+            conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className={`
+                  group relative rounded-lg transition-colors cursor-pointer
+                  ${
+                    currentChatId === conv.id
+                      ? "bg-primary/10 border border-primary/20"
+                      : "hover:bg-muted/50"
+                  }
+                `}
+                onClick={() => onSelectChat?.(conv.id)}
+              >
+                <div className="flex items-start gap-3 p-3">
+                  {conv.isPinned ? (
+                    <Pin className="w-4 h-4 flex-shrink-0 mt-0.5 text-primary fill-current" />
+                  ) : (
+                    <MessageSquare
+                      className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                        currentChatId === conv.id
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                      }`}
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <h4
+                      className={`text-sm font-medium truncate ${
+                        currentChatId === conv.id ? "text-primary" : ""
+                      }`}
+                    >
+                      {conv.title}
+                    </h4>
+                    {conv.lastMessage && (
+                      <p className="text-xs text-muted-foreground truncate mt-1">
+                        {conv.lastMessage}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-muted-foreground">
+                        {formatTimestamp(conv.lastActive)}
+                      </p>
+                      <span className="text-xs text-muted-foreground">•</span>
+                      <p className="text-xs text-muted-foreground">
+                        {conv.messageCount} {conv.messageCount === 1 ? 'msg' : 'msgs'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* More Options */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTogglePin(conv.id, !!conv.isPinned);
+                        }}
+                      >
+                        <Pin className="w-4 h-4 mr-2" />
+                        {conv.isPinned
+                          ? (isHindi ? "अनपिन करें" : "Unpin")
+                          : (isHindi ? "पिन करें" : "Pin")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(conv.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {isHindi ? "हटाएं" : "Delete"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </ScrollArea>
 
@@ -204,10 +277,35 @@ export function ChatSidebar({
       <div className="p-4 border-t">
         <p className="text-xs text-muted-foreground text-center">
           {isHindi
-            ? `${chatHistory.length} चैट • आज`
-            : `${chatHistory.length} chats • Today`}
+            ? `${conversations.length} चैट`
+            : `${conversations.length} ${conversations.length === 1 ? 'chat' : 'chats'}`}
         </p>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isHindi ? "चैट हटाएं?" : "Delete chat?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isHindi
+                ? "यह चैट और सभी संदेश स्थायी रूप से हटा दिए जाएंगे। इसे पूर्ववत नहीं किया जा सकता।"
+                : "This chat and all its messages will be permanently deleted. This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{isHindi ? "रद्द करें" : "Cancel"}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isHindi ? "हटाएं" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }

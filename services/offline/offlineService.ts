@@ -147,7 +147,7 @@ export class OfflineService {
   }
 
   private generateLoanAnswer(schemes: ProcessedScheme[]): string {
-    const loanSchemes = schemes.filter(s =>
+    const loanSchemes = schemes.filter((s: any) =>
       s.category === 'loan' || s.category === 'credit'
     ).slice(0, 3);
 

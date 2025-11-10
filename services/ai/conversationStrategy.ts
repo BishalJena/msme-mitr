@@ -187,10 +187,11 @@ export class ConversationStrategyService {
       certification: "You want to get quality certification for your products/services. Is that what you need?",
       tech: "You're looking for technology upgradation or digital adoption support. Am I understanding correctly?",
       export: "You need support for exporting your products internationally. Is that right?",
+      general: "I understand you have a general inquiry about MSME support. How can I help you today?",
       unknown: "I want to make sure I understand correctly. Could you tell me which of these best describes what you're looking for?"
     };
 
-    return templates[intent.type] || templates.unknown;
+    return templates[intent.type as keyof typeof templates] || templates.unknown;
   }
 
   /**
@@ -210,16 +211,17 @@ export class ConversationStrategyService {
 
       case 'profile':
         const profileQs = [];
-        if (!context.businessType) {
+        const ctx = context as any;
+        if (!ctx.businessType) {
           profileQs.push("Is your business in manufacturing, service, or trading?");
         }
-        if (!context.annualTurnover) {
+        if (!ctx.annualTurnover) {
           profileQs.push("What is your approximate annual turnover?");
         }
-        if (!context.employeeCount) {
+        if (!ctx.employeeCount) {
           profileQs.push("How many employees do you have?");
         }
-        if (!context.businessAge) {
+        if (!ctx.businessAge) {
           profileQs.push("How old is your business?");
         }
         return profileQs;
@@ -327,9 +329,10 @@ export class ConversationStrategyService {
     userProfile: Partial<UserProfile>
   ): string[] {
     const steps: string[] = [];
+    const profile = userProfile as any;
 
     // Prioritize by user readiness
-    if (!userProfile.hasUdyamRegistration) {
+    if (!profile.hasUdyamRegistration) {
       steps.push('📝 Register on Udyam Portal (Free, Online, 10 minutes) - https://udyamregistration.gov.in');
     }
 
@@ -366,35 +369,36 @@ export class ConversationStrategyService {
   } {
     const eligible: string[] = [];
     const missing: string[] = [];
+    const prof = profile as any;
 
     // Check basic eligibility
     scheme.eligibilityCriteria.forEach(criteria => {
       const criteriaLower = criteria.toLowerCase();
 
       // Check business type
-      if (criteriaLower.includes('manufactur') && profile.businessType === 'manufacturing') {
+      if (criteriaLower.includes('manufactur') && prof.businessType === 'manufacturing') {
         eligible.push(criteria);
-      } else if (criteriaLower.includes('service') && profile.businessType === 'service') {
+      } else if (criteriaLower.includes('service') && prof.businessType === 'service') {
         eligible.push(criteria);
       }
 
       // Check special categories
-      if (criteriaLower.includes('women') && profile.category === 'Women') {
+      if (criteriaLower.includes('women') && prof.category === 'Women') {
         eligible.push(criteria);
-      } else if (criteriaLower.includes('sc/st') && ['SC', 'ST'].includes(profile.category || '')) {
+      } else if (criteriaLower.includes('sc/st') && ['SC', 'ST'].includes(prof.category || '')) {
         eligible.push(criteria);
       }
 
       // Check location
-      if (criteriaLower.includes('rural') && profile.location?.district?.includes('Rural')) {
+      if (criteriaLower.includes('rural') && prof.location?.district?.includes('Rural')) {
         eligible.push(criteria);
       }
 
       // Identify missing requirements
-      if (criteriaLower.includes('udyam') && !profile.hasUdyamRegistration) {
+      if (criteriaLower.includes('udyam') && !prof.hasUdyamRegistration) {
         missing.push('Complete Udyam Registration');
       }
-      if (criteriaLower.includes('gst') && !profile.gstNumber) {
+      if (criteriaLower.includes('gst') && !prof.gstNumber) {
         missing.push('Get GST Registration');
       }
     });

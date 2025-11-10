@@ -1,24 +1,30 @@
 import { NextRequest } from 'next/server';
 import { generateText } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { createOpenAI } from '@ai-sdk/openai';
 
 // Edge runtime for faster responses
 export const runtime = 'edge';
 
-// Configure OpenRouter using official provider
-const openrouter = createOpenRouter({
+// Configure OpenRouter using OpenAI provider for compatibility
+const openrouter = createOpenAI({
   apiKey: process.env.OPENROUTER_API_KEY || '',
+  baseURL: 'https://openrouter.ai/api/v1',
 });
 
 export async function POST(request: NextRequest) {
+  // Declare language outside try-catch so it's accessible in both blocks
+  let language = 'en';
+
   try {
-    const { language = 'en' } = await request.json();
+    // Parse request body and extract language
+    const body = await request.json();
+    language = body.language || 'en';
 
     const isHindi = language === 'hi';
 
     // Generate a personalized welcome message
     const { text } = await generateText({
-      model: openrouter.chat(process.env.OPENROUTER_MODEL || 'anthropic/claude-3-haiku'),
+      model: openrouter(process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'),
       prompt: isHindi
         ? `आप MSME Mitr AI हैं, भारतीय सूक्ष्म, लघु और मध्यम उद्यमों (MSMEs) के लिए एक AI सहायक। एक छोटा, स्वागत योग्य संदेश (2-3 वाक्य) हिंदी में लिखें जो:
 1. अपना परिचय दें

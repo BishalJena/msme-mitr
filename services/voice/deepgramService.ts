@@ -89,7 +89,7 @@ class DeepgramService {
         })
       };
 
-      const { result } = await this.client!.listen.prerecorded.transcribeBuffer(
+      const { result } = await (this.client!.listen.prerecorded as any).transcribeBuffer(
         audioBuffer,
         transcriptionOptions
       );
@@ -113,7 +113,7 @@ class DeepgramService {
         confidence: alternative.confidence || 0,
         language: result.results.channels[0].detected_language || options.language,
         duration: result.metadata?.duration || 0,
-        words: alternative.words?.map(word => ({
+        words: alternative.words?.map((word: any) => ({
           word: word.word || '',
           confidence: word.confidence || 0,
           start: word.start || 0,
@@ -163,7 +163,7 @@ class DeepgramService {
         transcriptionOptions
       );
 
-      const channel = result.results.channels[0];
+      const channel = result!.results.channels[0];
       const alternative = channel.alternatives[0];
 
       return {
