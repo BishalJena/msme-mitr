@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "next-themes";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -84,14 +85,16 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased min-h-screen bg-background">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-          {children}
-          <Toaster
-            position="top-center"
-            toastOptions={{
-              className: "text-base",
-              duration: 3000,
-            }}
-          />
+          <AuthProvider>
+            {children}
+            <Toaster
+              position="top-center"
+              toastOptions={{
+                className: "text-base",
+                duration: 3000,
+              }}
+            />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

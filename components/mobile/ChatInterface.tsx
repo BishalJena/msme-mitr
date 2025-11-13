@@ -1,16 +1,19 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { useConversationStoreDb } from "@/hooks/useConversationStoreDb";
+import { useOfflineMode } from "@/hooks/useOfflineMode";
+import { useChatVoiceInput } from "@/hooks/useVoiceRecording";
+import { toast } from "sonner";
 import {
   Send,
   Mic,
-  MicOff,
   Paperclip,
   Bot,
   User,
@@ -20,16 +23,9 @@ import {
   HelpCircle,
   TrendingUp,
   IndianRupee,
+  Loader2,
+  Square,
 } from "lucide-react";
-
-interface Message {
-  id: string;
-  content: string;
-  isBot: boolean;
-  timestamp: Date;
-  suggestions?: string[];
-  schemes?: any[];
-}
 
 interface QuickPrompt {
   text: string;
@@ -65,30 +61,59 @@ const quickPrompts: QuickPrompt[] = [
   },
 ];
 
-export function ChatInterface({ language = "en" }: { language?: string }) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      content:
-        language === "hi"
-          ? "नमस्ते! मैं आपका MSME AI सहायक हूं। मैं आपको सरकारी योजनाओं के बारे में जानकारी देने और आवेदन प्रक्रिया में मदद करने के लिए यहां हूं। आप मुझसे हिंदी या अंग्रेजी में बात कर सकते हैं। आप कैसे मदद चाहेंगे?"
-          : "Hello! I'm your MSME AI Assistant. I'm here to help you discover government schemes and guide you through the application process. You can chat with me in Hindi or English. How can I help you today?",
-      isBot: true,
-      timestamp: new Date(),
-      suggestions: [
-        "Show me all schemes",
-        "I want to start a business",
-        "Need funding for expansion",
-        "Check my eligibility",
-      ],
-    },
-  ]);
-  const [inputMessage, setInputMessage] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+export function ChatInterface({ 
+  language = "en",
+  userProfile = {},
+  onConversationChange,
+}: { 
+  language?: string;
+  userProfile?: any;
+  onConversationChange?: (conversationId: string | null) => void;
+}) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-
+  const { isOfflineMode } = useOfflineMode();
   const isHindi = language === "hi";
+
+  // Use database-backed conversation store
+  const {
+    messages,
+    input,
+    setInput,
+    isLoading,
+    error,
+    sendMessage,
+    stop,
+  } = useConversationStoreDb({
+    language,
+    userProfile,
+    onConversationChange,
+  });
+
+  // Voice recording hook
+  const voice = useChatVoiceInput((transcript) => {
+    setInput(transcript);
+    setTimeout(() => {
+      handleSendMessage();
+    }, 100);
+  });
+
+  // Helper to extract text from AI SDK v5 message parts
+  const getMessageText = (message: any): string => {
+    if (typeof message.content === 'string' && message.content) {
+      return message.content;
+    }
+    if (typeof message.text === 'string' && message.text) {
+      return message.text;
+    }
+    if (message.parts && Array.isArray(message.parts)) {
+      return message.parts
+        .filter((part: any) => part && (part.type === 'text' || part.text))
+        .map((part: any) => part.text || '')
+        .filter(Boolean)
+        .join('');
+    }
+    return '';
+  };
 
   useEffect(() => {
     // Scroll to bottom when new messages are added
@@ -97,88 +122,24 @@ export function ChatInterface({ language = "en" }: { language?: string }) {
     }
   }, [messages]);
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return;
+  const handleSendMessage = useCallback(() => {
+    if (!input.trim()) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputMessage,
-      isBot: false,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputMessage("");
-    setIsTyping(true);
-
-    try {
-      // Call the API with scheme context
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: inputMessage,
-          sessionId: localStorage.getItem('chatSessionId') || undefined,
-          language: language,
-          userProfile: {
-            // Add user profile if available
-          }
-        }),
-      });
-
-      const data = await response.json();
-
-      // Store session ID
-      if (data.sessionId) {
-        localStorage.setItem('chatSessionId', data.sessionId);
-      }
-
-      // Create bot response with real data
-      const botResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        content: data.message,
-        isBot: true,
-        timestamp: new Date(),
-        suggestions: data.suggestedActions,
-        schemes: data.relevantSchemes,
-      };
-
-      setMessages((prev) => [...prev, botResponse]);
-      setIsTyping(false);
-
-      // Log token usage in development
-      if (process.env.NODE_ENV === 'development' && data.tokenCount) {
-        console.log(`Tokens used: ${data.tokenCount}`);
-        if (data.systemPrompt) {
-          console.log('System Prompt:', data.systemPrompt);
-        }
-      }
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setIsTyping(false);
-
-      // Fallback response
-      const errorResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "I apologize, but I'm having trouble connecting right now. Please try again in a moment.",
-        isBot: true,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorResponse]);
+    // If offline, show warning but still try to send
+    if (isOfflineMode) {
+      toast.info(isHindi ? 'आप ऑफ़लाइन हैं' : 'You appear to be offline');
     }
-  };
 
-  const handleQuickPrompt = (prompt: string) => {
-    setInputMessage(prompt);
-    handleSendMessage();
-  };
+    // Send via conversation store (handles persistence)
+    sendMessage(input);
+  }, [input, isOfflineMode, sendMessage, isHindi]);
 
-  const handleVoiceInput = () => {
-    setIsRecording(!isRecording);
-    // Implement voice recording logic here
-  };
+  const handleQuickPrompt = useCallback((prompt: string) => {
+    setInput(prompt);
+    setTimeout(() => {
+      handleSendMessage();
+    }, 0);
+  }, [setInput, handleSendMessage]);
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -188,98 +149,56 @@ export function ChatInterface({ language = "en" }: { language?: string }) {
         className="flex-1 px-4 py-4"
       >
         <div className="space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex gap-3 ${
-                message.isBot ? "justify-start" : "justify-end"
-              }`}
-            >
-              {message.isBot && (
-                <Avatar className="w-8 h-8 flex-shrink-0">
-                  <AvatarFallback className="bg-primary text-primary-foreground">
-                    <Bot className="w-5 h-5" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
-
+          {messages.map((message) => {
+            const content = getMessageText(message);
+            const isBot = message.role === 'assistant';
+            
+            return (
               <div
-                className={`max-w-[85%] ${
-                  message.isBot ? "order-2" : "order-1"
+                key={message.id}
+                className={`flex gap-3 ${
+                  isBot ? "justify-start" : "justify-end"
                 }`}
               >
-                <Card
-                  className={`p-3 ${
-                    message.isBot
-                      ? "bg-muted border-muted"
-                      : "bg-primary text-primary-foreground border-primary"
+                {isBot && (
+                  <Avatar className="w-8 h-8 flex-shrink-0">
+                    <AvatarFallback className="bg-primary text-primary-foreground">
+                      <Bot className="w-5 h-5" />
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+
+                <div
+                  className={`max-w-[85%] ${
+                    isBot ? "order-2" : "order-1"
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">
-                    {message.content}
-                  </p>
-                </Card>
+                  <Card
+                    className={`p-3 ${
+                      isBot
+                        ? "bg-muted border-muted"
+                        : "bg-primary text-primary-foreground border-primary"
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">
+                      {content}
+                    </p>
+                  </Card>
+                </div>
 
-                {/* Relevant Schemes */}
-                {message.schemes && message.schemes.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {message.schemes.map((scheme, idx) => (
-                      <Card key={idx} className="p-3 bg-background border">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <h4 className="font-medium text-sm">{scheme.name}</h4>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {scheme.summary}
-                            </p>
-                            <Badge variant="secondary" className="mt-2 text-xs">
-                              {scheme.category}
-                            </Badge>
-                          </div>
-                        </div>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="p-0 h-auto text-xs mt-2"
-                          onClick={() => window.open(scheme.url, '_blank')}
-                        >
-                          View Details →
-                        </Button>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-
-                {/* Suggestions */}
-                {message.suggestions && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {message.suggestions.map((suggestion, idx) => (
-                      <Button
-                        key={idx}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-8"
-                        onClick={() => handleQuickPrompt(suggestion)}
-                      >
-                        {suggestion}
-                        <ArrowRight className="w-3 h-3 ml-1" />
-                      </Button>
-                    ))}
-                  </div>
+                {!isBot && (
+                  <Avatar className="w-8 h-8 flex-shrink-0">
+                    <AvatarFallback className="bg-secondary text-secondary-foreground">
+                      <User className="w-5 h-5" />
+                    </AvatarFallback>
+                  </Avatar>
                 )}
               </div>
-
-              {!message.isBot && (
-                <Avatar className="w-8 h-8 flex-shrink-0">
-                  <AvatarFallback className="bg-secondary text-secondary-foreground">
-                    <User className="w-5 h-5" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
-            </div>
-          ))}
+            );
+          })}
 
           {/* Typing Indicator */}
-          {isTyping && (
+          {isLoading && (
             <div className="flex gap-3">
               <Avatar className="w-8 h-8">
                 <AvatarFallback className="bg-primary text-primary-foreground">
@@ -295,11 +214,20 @@ export function ChatInterface({ language = "en" }: { language?: string }) {
               </Card>
             </div>
           )}
+
+          {/* Error display */}
+          {error && (
+            <Card className="bg-destructive/10 border-destructive/20 p-3">
+              <p className="text-sm text-destructive">
+                {error.message || (isHindi ? 'कुछ गलत हुआ। कृपया पुनः प्रयास करें।' : 'Something went wrong. Please try again.')}
+              </p>
+            </Card>
+          )}
         </div>
       </ScrollArea>
 
       {/* Quick Prompts */}
-      {messages.length === 1 && (
+      {messages.length === 0 && !isLoading && (
         <div className="px-4 pb-4">
           <p className="text-xs text-muted-foreground mb-2">
             {isHindi ? "त्वरित प्रश्न" : "Quick questions"}
@@ -315,6 +243,7 @@ export function ChatInterface({ language = "en" }: { language?: string }) {
                     isHindi && prompt.textHi ? prompt.textHi : prompt.text
                   )
                 }
+                disabled={isLoading}
               >
                 <div className="flex items-start gap-2">
                   <span className="text-primary mt-0.5">{prompt.icon}</span>
@@ -335,47 +264,72 @@ export function ChatInterface({ language = "en" }: { language?: string }) {
             variant="ghost"
             size="icon"
             className="flex-shrink-0"
-            onClick={() => {}}
-            aria-label="Attach file"
+            onClick={() => toast.info(isHindi ? 'फ़ाइल अटैच करना जल्द आ रहा है!' : 'File attachment coming soon!')}
+            aria-label={isHindi ? 'फ़ाइल संलग्न करें' : 'Attach file'}
+            disabled={isLoading}
           >
             <Paperclip className="w-5 h-5" />
           </Button>
 
           <div className="flex-1 relative">
             <Input
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
               placeholder={
                 isHindi
                   ? "अपना प्रश्न टाइप करें या बोलें..."
                   : "Type your question or speak..."
               }
               className="pr-10 min-h-[48px] text-base"
+              disabled={isLoading}
             />
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8"
-              onClick={handleVoiceInput}
-              aria-label={isRecording ? "Stop recording" : "Start recording"}
+              className={`absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 ${
+                voice.isRecording ? 'bg-red-500/10' : ''
+              }`}
+              onClick={voice.toggleVoiceMode}
+              aria-label={voice.isRecording ? (isHindi ? "रिकॉर्डिंग बंद करें" : "Stop recording") : (isHindi ? "रिकॉर्डिंग शुरू करें" : "Start recording")}
+              disabled={isLoading || voice.isTranscribing}
             >
-              {isRecording ? (
-                <MicOff className="w-4 h-4 text-red-500" />
+              {voice.isTranscribing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : voice.isRecording ? (
+                <Square className="w-3 h-3 text-red-500" />
               ) : (
                 <Mic className="w-4 h-4" />
               )}
             </Button>
+            {/* Voice recording indicator */}
+            {voice.isRecording && (
+              <div className="absolute -top-8 right-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full animate-pulse">
+                {isHindi ? 'रिकॉर्ड कर रहे हैं' : 'Recording'} {voice.duration}
+              </div>
+            )}
           </div>
 
-          <Button
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim()}
-            className="flex-shrink-0 btn-touch px-4"
-            aria-label="Send message"
-          >
-            <Send className="w-5 h-5" />
-          </Button>
+          {isLoading ? (
+            <Button
+              onClick={() => stop()}
+              className="flex-shrink-0 btn-touch px-4"
+              variant="destructive"
+              aria-label={isHindi ? 'रोकें' : 'Stop'}
+            >
+              <Square className="w-4 h-4 mr-2" />
+              {isHindi ? 'रोकें' : 'Stop'}
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!input.trim() || isLoading}
+              className="flex-shrink-0 btn-touch px-4"
+              aria-label={isHindi ? 'भेजें' : 'Send message'}
+            >
+              <Send className="w-5 h-5" />
+            </Button>
+          )}
         </div>
 
         {/* Language Hint */}

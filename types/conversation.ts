@@ -6,6 +6,8 @@
  */
 
 import { UserProfile } from './scheme';
+import type { Conversation } from './database';
+import type { UIMessage as Message } from '@ai-sdk/react';
 
 /**
  * Message format compatible with AI SDK v5
@@ -147,3 +149,31 @@ export interface StorageStats {
   newestConversation?: Date;
   averageMessagesPerConversation: number;
 }
+
+// ============================================================================
+// Lazy Conversation Creation Types
+// ============================================================================
+
+/**
+ * Temporary conversation stored in-memory before persistence
+ * Used to prevent empty conversations from cluttering the database
+ */
+export interface TempConversation {
+  id: string;              // Temporary UUID (prefixed with 'temp_')
+  title: string;           // Default: "New Chat"
+  messages: any[];         // In-memory messages (AI SDK UIMessage format)
+  createdAt: Date;
+  language: string;
+  model: string;
+}
+
+/**
+ * Union type representing the state of a conversation
+ * - temporary: In-memory only, not yet persisted to database
+ * - persisted: Saved to database with a real ID
+ * - null: No active conversation
+ */
+export type ConversationState = 
+  | { type: 'temporary'; data: TempConversation }
+  | { type: 'persisted'; data: Conversation }
+  | null;

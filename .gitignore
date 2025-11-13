@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.kiro
+.vscode
+.claude
+
+*.md
+!README.md
+!README.MD
+
+*.sql
+
+migrations/
+
+*.test.*

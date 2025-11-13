@@ -91,8 +91,8 @@ export class OfflineService {
   /**
    * Update the offline cache
    */
-  public updateCache(): void {
-    const schemes = schemeDataService.getAllSchemes();
+  public async updateCache(): Promise<void> {
+    const schemes = await schemeDataService.getAllSchemes();
 
     this.cache = {
       schemes,
@@ -193,7 +193,7 @@ export class OfflineService {
   /**
    * Get offline response for a query
    */
-  public getOfflineResponse(query: string): string {
+  public async getOfflineResponse(query: string): Promise<string> {
     const queryLower = query.toLowerCase();
 
     // Check common questions
@@ -209,7 +209,7 @@ export class OfflineService {
     }
 
     // Search in schemes
-    const relevantSchemes = schemeDataService.searchSchemes(query).slice(0, 3);
+    const relevantSchemes = (await schemeDataService.searchSchemes(query)).slice(0, 3);
 
     if (relevantSchemes.length > 0) {
       let response = `Found ${relevantSchemes.length} relevant schemes:\n\n`;

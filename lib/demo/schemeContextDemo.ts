@@ -13,7 +13,7 @@ export async function demonstrateSchemeContext() {
   console.log('=' .repeat(60));
 
   // 1. Show total schemes available
-  const allSchemes = schemeDataService.getAllSchemes();
+  const allSchemes = await schemeDataService.getAllSchemes();
   console.log(`\n📊 Total Schemes Loaded: ${allSchemes.length}`);
   console.log('Categories:', [...new Set(allSchemes.map(s => s.category))].join(', '));
 
@@ -22,7 +22,7 @@ export async function demonstrateSchemeContext() {
   console.log('\n🔍 Example 1: User asks about loans\n');
 
   const loanQuery = "I need a loan for my small manufacturing business";
-  const loanContext = llmContextBuilder.buildConversationContext({
+  const loanContext = await llmContextBuilder.buildConversationContext({
     userQuery: loanQuery,
     maxTokens: 2500
   });
@@ -31,7 +31,7 @@ export async function demonstrateSchemeContext() {
   console.log(`Relevant Schemes Found: ${loanContext.relevantSchemes.length}`);
   console.log('Schemes:', loanContext.relevantSchemes.map(s => s.name).join(', '));
 
-  const systemPrompt = llmContextBuilder.generateSystemPrompt(loanContext);
+  const systemPrompt = await llmContextBuilder.generateSystemPrompt(loanContext);
   console.log(`\nSystem Prompt Length: ${systemPrompt.length} characters (~${Math.ceil(systemPrompt.length/4)} tokens)`);
   console.log('\nFirst 500 chars of System Prompt:');
   console.log(systemPrompt.substring(0, 500) + '...');
@@ -47,7 +47,7 @@ export async function demonstrateSchemeContext() {
     interests: ['manufacturing', 'handicrafts']
   };
 
-  const womenContext = llmContextBuilder.buildConversationContext({
+  const womenContext = await llmContextBuilder.buildConversationContext({
     userQuery: "What schemes are available for me?",
     userProfile: womenProfile,
     maxTokens: 2000
@@ -70,14 +70,15 @@ export async function demonstrateSchemeContext() {
   const formats = ['minimal', 'standard', 'detailed'];
   const tokenLimits = [1000, 2500, 5000];
 
-  formats.forEach((format, i) => {
-    const context = llmContextBuilder.buildConversationContext({
+  for (let i = 0; i < formats.length; i++) {
+    const format = formats[i];
+    const context = await llmContextBuilder.buildConversationContext({
       userQuery: "Show me all schemes",
       maxTokens: tokenLimits[i],
       includeAllSchemes: true
     });
 
-    const tokenEstimate = schemeDataService.getTokenEstimate(
+    const tokenEstimate = await schemeDataService.getTokenEstimate(
       context.relevantSchemes,
       format as 'minimal' | 'detailed'
     );
@@ -86,7 +87,7 @@ export async function demonstrateSchemeContext() {
     console.log(`  - Max Tokens: ${tokenLimits[i]}`);
     console.log(`  - Schemes Included: ${context.relevantSchemes.length}`);
     console.log(`  - Estimated Tokens: ${tokenEstimate}`);
-  });
+  }
 
   // 5. Demonstrate conversation flow
   console.log('\n' + '='.repeat(60));
@@ -147,11 +148,11 @@ export async function demonstrateSchemeContext() {
   console.log('\n' + '='.repeat(60));
   console.log('\n💾 Memory & Efficiency\n');
 
-  const minimalContext = llmContextBuilder.buildMinimalContext();
+  const minimalContext = await llmContextBuilder.buildMinimalContext();
   console.log(`Minimal Context (All Schemes): ${minimalContext.length} chars`);
   console.log(`Average per scheme: ${Math.round(minimalContext.length / allSchemes.length)} chars`);
 
-  const summary = conversationManager.getConversationSummary(chat2.session.id);
+  const summary = await conversationManager.getConversationSummary(chat2.session.id);
   console.log('\nConversation Summary Generated:');
   console.log(summary.substring(0, 300) + '...');
 

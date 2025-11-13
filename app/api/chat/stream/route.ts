@@ -159,7 +159,7 @@ function checkRateLimit(clientId: string): boolean {
  * Handle fallback response when OpenRouter is not configured
  */
 async function handleFallbackResponse(message: string, sessionId?: string) {
-  const schemes = schemeDataService.getAllSchemes();
+  const schemes = await schemeDataService.getAllSchemes();
 
   // Generate simple fallback response
   const fallbackResponse = `I apologize, but the AI service is not currently configured. However, I can tell you that we have ${schemes.length} government schemes available. To enable full AI capabilities, please configure your OPENROUTER_API_KEY environment variable.`;

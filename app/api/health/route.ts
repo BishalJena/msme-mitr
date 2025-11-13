@@ -8,13 +8,18 @@ import { schemeDataService } from '@/services/schemes/schemeDataService';
  */
 export async function GET(request: NextRequest) {
   try {
+    const schemes = await schemeDataService.getAllSchemes();
+    const cacheStats = schemeDataService.getCacheStats();
+    
     const status = {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       services: {
         schemeData: {
           status: 'operational',
-          schemesCount: schemeDataService.getAllSchemes().length
+          schemesCount: schemes.length,
+          cacheMode: cacheStats.mode,
+          cacheSize: cacheStats.size
         },
         openRouter: {
           status: openRouterService.isConfigured() ? 'configured' : 'not_configured',

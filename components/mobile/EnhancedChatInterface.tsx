@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useOfflineMode } from "@/hooks/useOfflineMode";
 import { OfflineModeMessage, NetworkStatusBadge } from "@/components/ui/network-status";
 import { useChatVoiceInput } from "@/hooks/useVoiceRecording";
+import { useConversationStoreDb } from "@/hooks/useConversationStoreDb";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { QuickReplyChips, QuickReply, commonQuickReplies } from "./QuickReplyChips";
@@ -87,22 +88,41 @@ export function EnhancedChatInterface({
   userProfile?: any;
 }) {
   const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku');
-  const [sessionId, setSessionId] = useState<string>('');
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
 
-  const { isOfflineMode, getOfflineResponse, status } = useOfflineMode();
+  const { isOfflineMode } = useOfflineMode();
   const isHindi = language === "hi";
+
+  // Use database-backed conversation store
+  const {
+    messages,
+    input,
+    setInput,
+    isLoading,
+    error,
+    sendMessage: sendMessageDb,
+    stop,
+  } = useConversationStoreDb({
+    language,
+    userProfile,
+  });
 
   // Helper to extract text from AI SDK v5 message parts
   const getMessageText = (message: any): string => {
-    if (message.content) return message.content; // Fallback for old format
-    if (message.parts) {
+    if (typeof message.content === 'string' && message.content) {
+      return message.content;
+    }
+    if (typeof message.text === 'string' && message.text) {
+      return message.text;
+    }
+    if (message.parts && Array.isArray(message.parts)) {
       return message.parts
-        .filter((part: any) => part.type === 'text')
-        .map((part: any) => part.text)
+        .filter((part: any) => part && (part.type === 'text' || part.text))
+        .map((part: any) => part.text || '')
+        .filter(Boolean)
         .join('');
     }
     return '';
@@ -113,39 +133,11 @@ export function EnhancedChatInterface({
     setInput(transcript);
     // Optionally auto-send after transcription
     setTimeout(() => {
-      const form = document.querySelector('form') as HTMLFormElement;
-      if (form && transcript.trim()) {
-        form.requestSubmit();
+      if (transcript.trim()) {
+        sendMessageDb(transcript);
       }
     }, 100);
   });
-
-  // AI SDK v5: Manual input management
-  const [input, setInput] = useState('');
-
-  // Use the AI SDK's useChat hook for streaming
-  const {
-    messages,
-    status: chatStatus,
-    error,
-    stop,
-    setMessages,
-    sendMessage,
-  } = useChat(); // AI SDK v5: minimal config
-
-  // AI SDK v5 uses 'status' with values: 'ready', 'submitted', 'error'
-  const isLoading = chatStatus === 'submitted';
-
-  // Load session ID and add welcome message on mount
-  useEffect(() => {
-    const savedSessionId = localStorage.getItem('chatSessionId');
-    if (savedSessionId) {
-      setSessionId(savedSessionId);
-    }
-
-    // TODO: Add welcome message using v5 message format (parts array)
-    // For now, user can start chatting immediately
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom when messages update
   useEffect(() => {
@@ -186,7 +178,7 @@ export function EnhancedChatInterface({
     setTimeout(() => document.body.removeChild(announcement), 1000);
   };
 
-  // Handle submit with offline mode support (AI SDK v5)
+  // Handle submit with offline mode support
   const handleSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -200,22 +192,19 @@ export function EnhancedChatInterface({
       toast.info(isHindi ? 'आप ऑफ़लाइन हैं' : 'You appear to be offline');
     }
 
-    // Use AI SDK v5 sendMessage
-    // TODO: Pass sessionId, language, userProfile, model via headers or cookies
-    sendMessage({ text: input });
-    setInput('');
-  }, [input, isOfflineMode, messages, setMessages, getOfflineResponse, sendMessage, isHindi, sessionId, language, userProfile, selectedModel]);
+    // Send via conversation store (handles persistence)
+    sendMessageDb(input);
+  }, [input, isOfflineMode, sendMessageDb, isHindi]);
 
   // Handle quick prompt selection
   const handleQuickPrompt = useCallback((prompt: string) => {
     setInput(prompt);
     setShowQuickReplies(false);
-    // Trigger form submission programmatically
-    const form = document.querySelector('form') as HTMLFormElement;
-    if (form) {
-      form.requestSubmit();
-    }
-  }, [setInput]);
+    // Send message directly
+    setTimeout(() => {
+      sendMessageDb(prompt);
+    }, 0);
+  }, [setInput, sendMessageDb]);
 
   // Handle model change
   const handleModelChange = useCallback((model: string) => {

@@ -1,5 +1,13 @@
 // Core type definitions for MSME Advisory System
 
+// Export Supabase database types
+// Note: Json type is exported from database.ts only to avoid duplication
+export * from './database'
+export * from './supabase'
+
+// Re-export Json type explicitly to ensure it's available
+export type { Json } from './database'
+
 // User Types
 export interface User {
   id: string;

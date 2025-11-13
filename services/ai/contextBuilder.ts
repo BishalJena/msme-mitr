@@ -38,14 +38,14 @@ export class LLMContextBuilder {
   /**
    * Build optimized context for a conversation
    */
-  buildConversationContext(params: {
+  async buildConversationContext(params: {
     userQuery: string;
     userProfile?: UserProfile;
     conversationHistory?: ChatHistory[];
     language?: string;
     maxTokens?: number;
     includeAllSchemes?: boolean;
-  }): ConversationContext {
+  }): Promise<ConversationContext> {
     const {
       userQuery,
       userProfile,
@@ -60,8 +60,8 @@ export class LLMContextBuilder {
 
     // Get relevant schemes
     const relevantSchemes = includeAllSchemes
-      ? schemeDataService.getAllSchemes()
-      : this.selectRelevantSchemes(userQuery, userProfile, conversationHistory);
+      ? await schemeDataService.getAllSchemes()
+      : await this.selectRelevantSchemes(userQuery, userProfile, conversationHistory);
 
     // Optimize schemes for token limit
     const optimizedSchemes = this.optimizeSchemesForTokens(
@@ -166,10 +166,10 @@ Remember: Users may have limited time, internet, and technical knowledge. Make e
   /**
    * Build minimal context for quick responses
    */
-  buildMinimalContext(schemeIds?: string[]): string {
+  async buildMinimalContext(schemeIds?: string[]): Promise<string> {
     const schemes = schemeIds
-      ? schemeIds.map(id => schemeDataService.getSchemeById(id)).filter(Boolean) as ProcessedScheme[]
-      : schemeDataService.getAllSchemes();
+      ? await Promise.all(schemeIds.map(id => schemeDataService.getSchemeById(id))).then(results => results.filter(Boolean) as ProcessedScheme[])
+      : await schemeDataService.getAllSchemes();
 
     return schemes
       .slice(0, 5)
@@ -180,12 +180,12 @@ Remember: Users may have limited time, internet, and technical knowledge. Make e
   /**
    * Select relevant schemes based on query and context
    */
-  private selectRelevantSchemes(
+  private async selectRelevantSchemes(
     query: string,
     userProfile?: UserProfile,
     history?: ChatHistory[]
-  ): ProcessedScheme[] {
-    const allSchemes = schemeDataService.getAllSchemes();
+  ): Promise<ProcessedScheme[]> {
+    const allSchemes = await schemeDataService.getAllSchemes();
 
     // Extract intent from query
     const intent = this.extractQueryIntent(query);
@@ -195,7 +195,7 @@ Remember: Users may have limited time, internet, and technical knowledge. Make e
 
     // Strategy 1: Direct search
     if (intent.searchTerms.length > 0) {
-      const searchResults = schemeDataService.searchSchemes(
+      const searchResults = await schemeDataService.searchSchemes(
         intent.searchTerms.join(' ')
       );
       relevantSchemes.push(...searchResults);
@@ -222,10 +222,10 @@ Remember: Users may have limited time, internet, and technical knowledge. Make e
         msg.mentionedSchemes?.forEach(id => mentionedSchemeIds.add(id));
       });
 
-      mentionedSchemeIds.forEach(id => {
-        const scheme = schemeDataService.getSchemeById(id);
-        if (scheme) relevantSchemes.push(scheme);
-      });
+      const mentionedSchemes = await Promise.all(
+        Array.from(mentionedSchemeIds).map(id => schemeDataService.getSchemeById(id))
+      );
+      relevantSchemes.push(...mentionedSchemes.filter(Boolean) as ProcessedScheme[]);
     }
 
     // Remove duplicates and rank
@@ -532,11 +532,11 @@ Link: ${scheme.url}
   /**
    * Update context with conversation feedback
    */
-  updateContextWithFeedback(
+  async updateContextWithFeedback(
     context: ConversationContext,
     userResponse: string,
     assistantResponse: string
-  ): ConversationContext {
+  ): Promise<ConversationContext> {
     // Add to conversation history
     const newHistory: ChatHistory[] = [
       ...context.conversationHistory || [],
@@ -544,13 +544,13 @@ Link: ${scheme.url}
         role: 'user',
         content: userResponse,
         timestamp: new Date(),
-        mentionedSchemes: this.extractMentionedSchemes(userResponse)
+        mentionedSchemes: await this.extractMentionedSchemes(userResponse)
       },
       {
         role: 'assistant',
         content: assistantResponse,
         timestamp: new Date(),
-        mentionedSchemes: this.extractMentionedSchemes(assistantResponse)
+        mentionedSchemes: await this.extractMentionedSchemes(assistantResponse)
       }
     ];
 
@@ -567,8 +567,8 @@ Link: ${scheme.url}
   /**
    * Extract mentioned scheme IDs from text
    */
-  private extractMentionedSchemes(text: string): string[] {
-    const schemes = schemeDataService.getAllSchemes();
+  private async extractMentionedSchemes(text: string): Promise<string[]> {
+    const schemes = await schemeDataService.getAllSchemes();
     const mentioned: string[] = [];
 
     schemes.forEach(scheme => {

@@ -11,6 +11,7 @@ import {
   Trash2,
   MoreVertical,
   Pin,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,12 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import Link from "next/link";
-import type { ConversationMetadata } from "@/types/conversation";
-import {
-  getConversationMetadata,
-  deleteConversation,
-  updateConversation,
-} from "@/lib/conversationStorage";
+import { useConversations } from "@/hooks/useConversations";
 import { toast } from "sonner";
 
 interface ChatSidebarProps {
@@ -43,6 +39,7 @@ interface ChatSidebarProps {
   onSelectChat?: (chatId: string) => void;
   currentChatId?: string;
   refreshTrigger?: number; // Optional prop to trigger refresh
+  onBrowseSchemes?: () => void; // Optional callback when Browse Schemes is clicked
 }
 
 export function ChatSidebar({
@@ -51,28 +48,38 @@ export function ChatSidebar({
   onSelectChat,
   currentChatId,
   refreshTrigger,
+  onBrowseSchemes,
 }: ChatSidebarProps) {
   const isHindi = language === "hi";
-  const [conversations, setConversations] = useState<ConversationMetadata[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
 
-  // Load conversations from storage
-  const loadConversations = () => {
-    const result = getConversationMetadata();
-    if (result.success) {
-      setConversations(result.data);
-    } else {
-      console.error('Failed to load conversations:', result.error);
-    }
-  };
+  // Use database hook instead of localStorage
+  const {
+    conversations,
+    loading,
+    error,
+    deleteConversation: deleteConversationDb,
+    pinConversation,
+    unpinConversation,
+    refresh,
+  } = useConversations();
 
-  // Load on mount and when refreshTrigger changes
+  // Refresh when refreshTrigger changes
   useEffect(() => {
-    loadConversations();
-  }, [refreshTrigger]);
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      console.log('[ChatSidebar] Refresh triggered:', refreshTrigger);
+      refresh();
+    }
+  }, [refreshTrigger, refresh]);
 
-  const formatTimestamp = (date: Date) => {
+  // Log current chat ID changes for debugging
+  useEffect(() => {
+    console.log('[ChatSidebar] Current chat ID changed to:', currentChatId);
+  }, [currentChatId]);
+
+  const formatTimestamp = (dateString: string) => {
+    const date = new Date(dateString);
     const now = Date.now();
     const diff = now - date.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -100,17 +107,12 @@ export function ChatSidebar({
   const handleDeleteConfirm = async () => {
     if (!conversationToDelete) return;
 
-    const result = deleteConversation(conversationToDelete);
-    if (result.success) {
-      toast.success(isHindi ? 'चैट हटाई गई' : 'Chat deleted');
-      loadConversations();
-
+    const success = await deleteConversationDb(conversationToDelete);
+    if (success) {
       // If deleting current chat, trigger new chat
       if (conversationToDelete === currentChatId) {
         onNewChat?.();
       }
-    } else {
-      toast.error(result.error);
     }
 
     setDeleteDialogOpen(false);
@@ -118,15 +120,10 @@ export function ChatSidebar({
   };
 
   const handleTogglePin = async (chatId: string, currentPinned: boolean) => {
-    const result = updateConversation(chatId, { isPinned: !currentPinned });
-    if (result.success) {
-      toast.success(currentPinned
-        ? (isHindi ? 'अनपिन किया गया' : 'Unpinned')
-        : (isHindi ? 'पिन किया गया' : 'Pinned')
-      );
-      loadConversations();
+    if (currentPinned) {
+      await unpinConversation(chatId);
     } else {
-      toast.error(result.error);
+      await pinConversation(chatId);
     }
   };
 
@@ -145,7 +142,7 @@ export function ChatSidebar({
         </Button>
 
         {/* Schemes Button */}
-        <Link href="/schemes" className="block">
+        <Link href="/schemes" className="block" onClick={onBrowseSchemes}>
           <Button
             variant="outline"
             className="w-full justify-start gap-2 btn-touch"
@@ -167,10 +164,33 @@ export function ChatSidebar({
         </h3>
       </div>
 
-      {/* Chat History List */}
-      <ScrollArea className="flex-1 px-2">
-        <div className="space-y-1 pb-4">
-          {conversations.length === 0 ? (
+      {/* Chat History List - with explicit height for scrolling */}
+      <div className="flex-1 overflow-hidden px-2">
+        <ScrollArea className="h-full">
+          <div className="space-y-1 pb-4 pr-2">
+            {loading ? (
+            <div className="p-6 text-center text-muted-foreground">
+              <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
+              <p className="text-sm">
+                {isHindi ? "लोड हो रहा है..." : "Loading..."}
+              </p>
+            </div>
+          ) : error ? (
+            <div className="p-6 text-center text-destructive">
+              <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">
+                {isHindi ? "लोड करने में विफल" : "Failed to load"}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refresh()}
+                className="mt-2"
+              >
+                {isHindi ? "पुनः प्रयास करें" : "Retry"}
+              </Button>
+            </div>
+          ) : conversations.length === 0 ? (
             <div className="p-6 text-center text-muted-foreground">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">
@@ -195,7 +215,7 @@ export function ChatSidebar({
                 onClick={() => onSelectChat?.(conv.id)}
               >
                 <div className="flex items-start gap-3 p-3">
-                  {conv.isPinned ? (
+                  {conv.is_pinned ? (
                     <Pin className="w-4 h-4 flex-shrink-0 mt-0.5 text-primary fill-current" />
                   ) : (
                     <MessageSquare
@@ -214,18 +234,13 @@ export function ChatSidebar({
                     >
                       {conv.title}
                     </h4>
-                    {conv.lastMessage && (
-                      <p className="text-xs text-muted-foreground truncate mt-1">
-                        {conv.lastMessage}
-                      </p>
-                    )}
                     <div className="flex items-center gap-2 mt-1">
                       <p className="text-xs text-muted-foreground">
-                        {formatTimestamp(conv.lastActive)}
+                        {formatTimestamp(conv.last_active_at)}
                       </p>
                       <span className="text-xs text-muted-foreground">•</span>
                       <p className="text-xs text-muted-foreground">
-                        {conv.messageCount} {conv.messageCount === 1 ? 'msg' : 'msgs'}
+                        {conv.message_count} {conv.message_count === 1 ? 'msg' : 'msgs'}
                       </p>
                     </div>
                   </div>
@@ -246,11 +261,11 @@ export function ChatSidebar({
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleTogglePin(conv.id, !!conv.isPinned);
+                          handleTogglePin(conv.id, !!conv.is_pinned);
                         }}
                       >
                         <Pin className="w-4 h-4 mr-2" />
-                        {conv.isPinned
+                        {conv.is_pinned
                           ? (isHindi ? "अनपिन करें" : "Unpin")
                           : (isHindi ? "पिन करें" : "Pin")}
                       </DropdownMenuItem>
@@ -270,8 +285,9 @@ export function ChatSidebar({
               </div>
             ))
           )}
-        </div>
-      </ScrollArea>
+          </div>
+        </ScrollArea>
+      </div>
 
       {/* Sidebar Footer */}
       <div className="p-4 border-t">

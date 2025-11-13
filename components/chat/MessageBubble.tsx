@@ -14,17 +14,19 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-export function MessageBubble({ role, content, isStreaming = false }: MessageBubbleProps) {
+// Memoize the component to prevent unnecessary re-renders
+export const MessageBubble = React.memo(function MessageBubble({ role, content, isStreaming = false }: MessageBubbleProps) {
   const isUser = role === "user";
 
   // Define custom components with proper typing for react-markdown v10
+  // Use consistent text-sm sizing throughout to match the base text size
   const markdownComponents: Components = {
-    // Customize markdown rendering
-    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-    ul: ({ node, ...props }) => <ul className="mb-2 ml-4 list-disc space-y-1" {...props} />,
-    ol: ({ node, ...props }) => <ol className="mb-2 ml-4 list-decimal space-y-1" {...props} />,
-    li: ({ node, ...props }) => <li className="text-sm" {...props} />,
-    strong: ({ node, ...props }) => <strong className="font-semibold text-foreground" {...props} />,
+    // Customize markdown rendering with consistent sizing
+    p: ({ node, ...props }) => <p className="text-sm mb-2 last:mb-0 leading-relaxed" {...props} />,
+    ul: ({ node, ...props }) => <ul className="text-sm mb-2 ml-4 list-disc space-y-1" {...props} />,
+    ol: ({ node, ...props }) => <ol className="text-sm mb-2 ml-4 list-decimal space-y-1" {...props} />,
+    li: ({ node, ...props }) => <li className="text-sm leading-relaxed" {...props} />,
+    strong: ({ node, ...props }) => <strong className="font-semibold" {...props} />,
     em: ({ node, ...props }) => <em className="italic" {...props} />,
     code: (props) => {
       const { inline, className, children, ...rest } = props as any;
@@ -36,8 +38,8 @@ export function MessageBubble({ role, content, isStreaming = false }: MessageBub
         );
       }
       return (
-        <pre className="bg-muted-foreground/10 p-3 rounded-lg overflow-x-auto">
-          <code className={`text-xs font-mono ${className || ''}`}>{children}</code>
+        <pre className="bg-muted-foreground/10 p-3 rounded-lg overflow-x-auto mb-2">
+          <code className={`text-xs font-mono block ${className || ''}`}>{children}</code>
         </pre>
       );
     },
@@ -46,15 +48,15 @@ export function MessageBubble({ role, content, isStreaming = false }: MessageBub
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-primary underline hover:no-underline"
+        className="text-primary underline hover:no-underline text-sm"
         {...props}
       >
         {children}
       </a>
     ),
-    h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-2 mt-0" {...props} />,
-    h2: ({ node, ...props }) => <h2 className="text-lg font-bold mb-2 mt-0" {...props} />,
-    h3: ({ node, ...props }) => <h3 className="text-base font-semibold mb-2 mt-0" {...props} />,
+    h1: ({ node, ...props }) => <h1 className="text-base font-bold mb-2 mt-0" {...props} />,
+    h2: ({ node, ...props }) => <h2 className="text-sm font-bold mb-2 mt-0" {...props} />,
+    h3: ({ node, ...props }) => <h3 className="text-sm font-semibold mb-2 mt-0" {...props} />,
   };
 
   return (
@@ -82,7 +84,7 @@ export function MessageBubble({ role, content, isStreaming = false }: MessageBub
             isStreaming && "animate-pulse"
           )}
         >
-          <div className="prose prose-sm dark:prose-invert max-w-none text-sm sm:text-base">
+          <div className="text-sm leading-relaxed">
             {isUser ? (
               <p className="whitespace-pre-wrap m-0">{content}</p>
             ) : (
@@ -106,4 +108,4 @@ export function MessageBubble({ role, content, isStreaming = false }: MessageBub
       )}
     </div>
   );
-}
+});

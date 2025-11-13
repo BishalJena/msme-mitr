@@ -40,7 +40,7 @@ const navItems: NavItem[] = [
   {
     label: "AI Chat",
     labelHi: "AI चैट",
-    href: "/",
+    href: "/chat",
     icon: <Bot className="w-5 h-5" />,
   },
   {

@@ -6,11 +6,15 @@ import {
   SchemeCache,
   FinancialDetails
 } from '@/types/scheme';
+import { Scheme } from '@/types/database';
+import { createClient } from '@/lib/supabase/client';
 import schemesRawData from '@/data/schemes.json';
 
 /**
  * Service for loading, processing, and managing scheme data
  * Optimized for LLM context generation and token efficiency
+ * 
+ * Now supports both database and JSON fallback for backward compatibility
  */
 export class SchemeDataService {
   private cache: SchemeCache = {
@@ -20,19 +24,120 @@ export class SchemeDataService {
   };
 
   private rawData: SchemesDatabase = schemesRawData as SchemesDatabase;
+  private supabase = createClient();
+  private useDatabase: boolean = true; // Feature flag for database vs JSON
+  private isInitialized: boolean = false;
 
-  constructor() {
-    this.initializeCache();
+  constructor(useDatabase: boolean = true) {
+    this.useDatabase = useDatabase;
   }
 
   /**
-   * Initialize cache with processed schemes
+   * Initialize cache - async version for database support
    */
-  private initializeCache(): void {
+  async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+    
+    if (this.useDatabase) {
+      await this.initializeCacheFromDatabase();
+    } else {
+      this.initializeCacheFromJSON();
+    }
+    
+    this.isInitialized = true;
+  }
+
+  /**
+   * Initialize cache from database
+   */
+  private async initializeCacheFromDatabase(): Promise<void> {
+    try {
+      const { data: schemes, error } = await this.supabase
+        .from('schemes')
+        .select('*')
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error loading schemes from database:', error);
+        // Fallback to JSON
+        this.initializeCacheFromJSON();
+        return;
+      }
+
+      if (schemes && schemes.length > 0) {
+        const processed = schemes.map((scheme, index) => 
+          this.processSchemeFromDatabase(scheme, index)
+        );
+        processed.forEach(scheme => {
+          this.cache.processed.set(scheme.id, scheme);
+        });
+      } else {
+        // No schemes in database, fallback to JSON
+        this.initializeCacheFromJSON();
+      }
+    } catch (error) {
+      console.error('Failed to initialize from database:', error);
+      // Fallback to JSON
+      this.initializeCacheFromJSON();
+    }
+  }
+
+  /**
+   * Initialize cache from JSON (backward compatibility)
+   */
+  private initializeCacheFromJSON(): void {
     const schemes = this.processRawSchemes(this.rawData.schemes);
     schemes.forEach(scheme => {
       this.cache.processed.set(scheme.id, scheme);
     });
+  }
+
+  /**
+   * Process scheme from database format
+   */
+  private processSchemeFromDatabase(dbScheme: Scheme, index: number): ProcessedScheme {
+    // Convert database scheme to SchemeData format for processing
+    const schemeData: SchemeData = {
+      scheme_name: dbScheme.scheme_name,
+      scheme_url: dbScheme.scheme_url || '',
+      ministry: dbScheme.ministry || '',
+      description: dbScheme.description || '',
+      tags: dbScheme.tags || [],
+      details: typeof dbScheme.details === 'string' ? dbScheme.details : JSON.stringify(dbScheme.details || ''),
+      benefits: typeof dbScheme.benefits === 'string' ? dbScheme.benefits : JSON.stringify(dbScheme.benefits || ''),
+      eligibility: typeof dbScheme.eligibility === 'string' ? dbScheme.eligibility : JSON.stringify(dbScheme.eligibility || ''),
+      application_process: typeof dbScheme.application_process === 'object' && dbScheme.application_process !== null
+        ? dbScheme.application_process as any
+        : { content: JSON.stringify(dbScheme.application_process || ''), has_tabs: false },
+      documents_required: typeof dbScheme.documents_required === 'string' 
+        ? dbScheme.documents_required 
+        : JSON.stringify(dbScheme.documents_required || ''),
+      faqs: null,
+      sources: []
+    };
+
+    // Use existing processing logic
+    const processed = this.processScheme(schemeData, index);
+    
+    // Override ID with database ID
+    processed.id = dbScheme.id;
+    
+    // Use database category if available
+    if (dbScheme.category) {
+      processed.category = dbScheme.category as SchemeCategory;
+    }
+    
+    // Use database target audience if available
+    if (dbScheme.target_audience && dbScheme.target_audience.length > 0) {
+      processed.targetAudience = dbScheme.target_audience;
+    }
+    
+    // Use database financial details if available
+    if (dbScheme.financial_details) {
+      processed.financialDetails = dbScheme.financial_details as FinancialDetails;
+    }
+    
+    return processed;
   }
 
   /**
@@ -426,29 +531,108 @@ export class SchemeDataService {
   /**
    * Get all processed schemes
    */
-  getAllSchemes(): ProcessedScheme[] {
+  async getAllSchemes(): Promise<ProcessedScheme[]> {
+    await this.initialize();
+    
+    // If using database, fetch fresh data with cache check
+    if (this.useDatabase) {
+      await this.refreshCacheIfNeeded();
+    }
+    
     return Array.from(this.cache.processed.values());
   }
 
   /**
    * Get scheme by ID
    */
-  getSchemeById(id: string): ProcessedScheme | undefined {
-    return this.cache.processed.get(id);
+  async getSchemeById(id: string): Promise<ProcessedScheme | undefined> {
+    await this.initialize();
+    
+    // Try cache first
+    const cached = this.cache.processed.get(id);
+    if (cached) return cached;
+    
+    // If using database and not in cache, try fetching directly
+    if (this.useDatabase) {
+      try {
+        const { data: scheme, error } = await this.supabase
+          .from('schemes')
+          .select('*')
+          .eq('id', id)
+          .eq('is_active', true)
+          .single();
+        
+        if (!error && scheme) {
+          const processed = this.processSchemeFromDatabase(scheme, 0);
+          this.cache.processed.set(processed.id, processed);
+          return processed;
+        }
+      } catch (error) {
+        console.error('Error fetching scheme by ID:', error);
+      }
+    }
+    
+    return undefined;
   }
 
   /**
    * Get schemes by category
    */
-  getSchemesByCategory(category: SchemeCategory): ProcessedScheme[] {
-    return this.getAllSchemes().filter(scheme => scheme.category === category);
+  async getSchemesByCategory(category: SchemeCategory): Promise<ProcessedScheme[]> {
+    await this.initialize();
+    
+    // If using database, query directly for better performance
+    if (this.useDatabase) {
+      try {
+        const { data: schemes, error } = await this.supabase
+          .from('schemes')
+          .select('*')
+          .eq('category', category)
+          .eq('is_active', true);
+        
+        if (!error && schemes) {
+          return schemes.map((scheme, index) => 
+            this.processSchemeFromDatabase(scheme, index)
+          );
+        }
+      } catch (error) {
+        console.error('Error fetching schemes by category:', error);
+      }
+    }
+    
+    // Fallback to cache
+    const allSchemes = await this.getAllSchemes();
+    return allSchemes.filter(scheme => scheme.category === category);
   }
 
   /**
    * Get schemes by target audience
    */
-  getSchemesByAudience(audience: string): ProcessedScheme[] {
-    return this.getAllSchemes().filter(scheme =>
+  async getSchemesByAudience(audience: string): Promise<ProcessedScheme[]> {
+    await this.initialize();
+    
+    // If using database, use array contains query
+    if (this.useDatabase) {
+      try {
+        const { data: schemes, error } = await this.supabase
+          .from('schemes')
+          .select('*')
+          .contains('target_audience', [audience])
+          .eq('is_active', true);
+        
+        if (!error && schemes) {
+          return schemes.map((scheme, index) => 
+            this.processSchemeFromDatabase(scheme, index)
+          );
+        }
+      } catch (error) {
+        console.error('Error fetching schemes by audience:', error);
+      }
+    }
+    
+    // Fallback to cache with filter
+    const allSchemes = await this.getAllSchemes();
+    return allSchemes.filter(scheme =>
       scheme.targetAudience.some(a => a.toLowerCase().includes(audience.toLowerCase()))
     );
   }
@@ -456,9 +640,33 @@ export class SchemeDataService {
   /**
    * Search schemes by keyword
    */
-  searchSchemes(query: string): ProcessedScheme[] {
+  async searchSchemes(query: string): Promise<ProcessedScheme[]> {
+    await this.initialize();
+    
     const queryLower = query.toLowerCase();
-    return this.getAllSchemes().filter(scheme =>
+    
+    // If using database, use text search
+    if (this.useDatabase) {
+      try {
+        const { data: schemes, error } = await this.supabase
+          .from('schemes')
+          .select('*')
+          .or(`scheme_name.ilike.%${queryLower}%,description.ilike.%${queryLower}%,tags.cs.{${queryLower}}`)
+          .eq('is_active', true);
+        
+        if (!error && schemes) {
+          return schemes.map((scheme, index) => 
+            this.processSchemeFromDatabase(scheme, index)
+          );
+        }
+      } catch (error) {
+        console.error('Error searching schemes:', error);
+      }
+    }
+    
+    // Fallback to cache with filter
+    const allSchemes = await this.getAllSchemes();
+    return allSchemes.filter(scheme =>
       scheme.name.toLowerCase().includes(queryLower) ||
       scheme.summary.toLowerCase().includes(queryLower) ||
       scheme.tags.some(tag => tag.toLowerCase().includes(queryLower)) ||
@@ -482,16 +690,55 @@ export class SchemeDataService {
   /**
    * Refresh cache if needed
    */
-  refreshCacheIfNeeded(): void {
+  async refreshCacheIfNeeded(): Promise<void> {
     const now = new Date();
     const timeSinceRefresh = (now.getTime() - this.cache.lastRefresh.getTime()) / 1000;
 
     if (timeSinceRefresh > this.cache.ttl) {
-      this.initializeCache();
+      if (this.useDatabase) {
+        await this.initializeCacheFromDatabase();
+      } else {
+        this.initializeCacheFromJSON();
+      }
       this.cache.lastRefresh = now;
     }
   }
+
+  /**
+   * Force refresh cache from database
+   */
+  async forceRefresh(): Promise<void> {
+    this.cache.processed.clear();
+    this.isInitialized = false;
+    await this.initialize();
+  }
+
+  /**
+   * Switch between database and JSON mode
+   */
+  setDatabaseMode(useDatabase: boolean): void {
+    if (this.useDatabase !== useDatabase) {
+      this.useDatabase = useDatabase;
+      this.cache.processed.clear();
+      this.isInitialized = false;
+    }
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getCacheStats(): { size: number; lastRefresh: Date; ttl: number; mode: string } {
+    return {
+      size: this.cache.processed.size,
+      lastRefresh: this.cache.lastRefresh,
+      ttl: this.cache.ttl,
+      mode: this.useDatabase ? 'database' : 'json'
+    };
+  }
 }
 
-// Export singleton instance
-export const schemeDataService = new SchemeDataService();
+// Export singleton instance (defaults to database mode)
+export const schemeDataService = new SchemeDataService(true);
+
+// Export class for custom instances
+export default SchemeDataService;

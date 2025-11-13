@@ -43,8 +43,10 @@ export class ConversationManager {
   private readonly SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
   constructor() {
-    // Initialize scheme data on startup
-    schemeDataService.refreshCacheIfNeeded();
+    // Initialize scheme data on startup (async, but don't block constructor)
+    schemeDataService.initialize().catch(err => 
+      console.error('Failed to initialize scheme data:', err)
+    );
 
     // Clean up expired sessions periodically
     setInterval(() => this.cleanupExpiredSessions(), 5 * 60 * 1000); // Every 5 minutes
@@ -66,7 +68,7 @@ export class ConversationManager {
     );
 
     // Build conversation context
-    const context = llmContextBuilder.buildConversationContext({
+    const context = await llmContextBuilder.buildConversationContext({
       userQuery: request.message,
       userProfile: session.userProfile,
       conversationHistory: session.history,
@@ -128,19 +130,20 @@ export class ConversationManager {
   /**
    * Get quick scheme suggestions for a user
    */
-  getQuickSuggestions(sessionId?: string): ProcessedScheme[] {
+  async getQuickSuggestions(sessionId?: string): Promise<ProcessedScheme[]> {
     const session = sessionId ? this.sessions.get(sessionId) : null;
+    const allSchemes = await schemeDataService.getAllSchemes();
 
     if (session?.userProfile) {
       // Get personalized suggestions
       return getSchemesForProfile(
-        schemeDataService.getAllSchemes(),
+        allSchemes,
         session.userProfile
       ).slice(0, 3);
     }
 
     // Return popular schemes
-    return schemeDataService.getAllSchemes().slice(0, 3);
+    return allSchemes.slice(0, 3);
   }
 
   /**
@@ -187,13 +190,13 @@ export class ConversationManager {
   /**
    * Get scheme recommendations based on session
    */
-  getSchemeRecommendations(sessionId: string): {
+  async getSchemeRecommendations(sessionId: string): Promise<{
     primary: ProcessedScheme[];
     complementary: ProcessedScheme[];
     trending: ProcessedScheme[];
-  } {
+  }> {
     const session = this.sessions.get(sessionId);
-    const allSchemes = schemeDataService.getAllSchemes();
+    const allSchemes = await schemeDataService.getAllSchemes();
 
     if (!session) {
       return {
@@ -268,7 +271,7 @@ export class ConversationManager {
   /**
    * Get conversation summary
    */
-  getConversationSummary(sessionId: string): string {
+  async getConversationSummary(sessionId: string): Promise<string> {
     const session = this.sessions.get(sessionId);
     if (!session || session.history.length === 0) {
       return "No conversation history available.";
@@ -289,8 +292,10 @@ export class ConversationManager {
     // Discussed schemes
     if (data.interestedSchemes.length > 0) {
       summary += "**Schemes Discussed:**\n";
-      data.interestedSchemes.forEach(id => {
-        const scheme = schemeDataService.getSchemeById(id);
+      const schemes = await Promise.all(
+        data.interestedSchemes.map(id => schemeDataService.getSchemeById(id))
+      );
+      schemes.forEach(scheme => {
         if (scheme) {
           summary += `- ${scheme.name}\n`;
         }

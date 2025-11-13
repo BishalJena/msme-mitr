@@ -1,169 +1,171 @@
 "use client";
 
-import React from "react";
-import Link from "next/link";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  ArrowRight,
-  IndianRupee,
-  Users,
-  Calendar,
-  Building,
-  CheckCircle,
-} from "lucide-react";
+import { Building, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface SchemeCardProps {
   scheme: {
-    id?: string;
     scheme_name: string;
+    scheme_url: string;
     ministry: string;
     description: string;
     tags?: string[];
+    details?: string;
     benefits?: string;
     eligibility?: string;
+    application_process?: {
+      content: string;
+      has_tabs: boolean;
+    } | null;
+    documents_required?: string | null;
+    faqs?: string | null;
+    sources?: Array<{
+      text: string;
+      url: string;
+    }>;
   };
   language?: string;
 }
 
 export function SchemeCard({ scheme, language = "en" }: SchemeCardProps) {
-  // Extract key information from description/benefits
-  const getSchemeType = (tags: string[] = []) => {
-    if (tags.includes("Loan")) return { label: "Loan", color: "bg-blue-100 text-blue-800" };
-    if (tags.includes("Subsidy") || tags.includes("Credit Linked Subsidy"))
-      return { label: "Subsidy", color: "bg-green-100 text-green-800" };
-    if (tags.includes("Training") || tags.includes("Skill Development"))
-      return { label: "Training", color: "bg-purple-100 text-purple-800" };
-    if (tags.includes("Grant")) return { label: "Grant", color: "bg-amber-100 text-amber-800" };
-    return { label: "Support", color: "bg-gray-100 text-gray-800" };
+  const router = useRouter();
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const handleViewDetails = () => {
+    try {
+      if (scheme.scheme_url) {
+        window.open(scheme.scheme_url, '_blank', 'noopener,noreferrer');
+      } else {
+        // Fallback to local details page if scheme_url is not available
+        const schemeId = encodeURIComponent(scheme.scheme_name);
+        router.push(`/schemes/${schemeId}`);
+      }
+    } catch (error) {
+      console.error('Failed to open scheme URL:', error);
+      toast.error('Failed to open scheme details. Please try again.');
+    }
   };
 
-  const schemeType = getSchemeType(scheme.tags);
-
-  // Truncate description for card display
-  const truncateText = (text: string, maxLength: number = 150) => {
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + "...";
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsExpanded(!isExpanded);
   };
 
-  const getKeyBenefits = (benefits: string) => {
-    if (!benefits) return [];
-    // Extract first 3 key points from benefits
-    const points = benefits.split('.').filter(p => p.trim().length > 10);
-    return points.slice(0, 3).map(p => p.trim());
-  };
+  // Check if text is truncated
+  const isNameTruncated = scheme.scheme_name.length > 80;
+  const isDescriptionTruncated = scheme.description.length > 150;
+  const showExpandButton = isNameTruncated || isDescriptionTruncated;
 
   return (
-    <Card className="card-mobile hover:shadow-lg transition-shadow duration-200 border-l-4 border-l-primary">
-      <CardHeader className="pb-3">
-        <div className="flex justify-between items-start gap-2 mb-2">
-          <Badge className={`${schemeType.color} text-xs px-2 py-1`}>
-            {schemeType.label}
-          </Badge>
-          <Badge variant="outline" className="text-xs">
-            <Building className="w-3 h-3 mr-1" />
-            MSME
-          </Badge>
-        </div>
-
-        <CardTitle className="text-lg leading-tight line-clamp-2">
+    <Card 
+      className={cn(
+        "flex flex-col hover:shadow-lg transition-all duration-300 ease-in-out",
+        isExpanded && "ring-2 ring-primary/20 shadow-xl z-10"
+      )}
+    >
+      <CardHeader className="relative pb-3">
+        {/* Ministry Badge */}
+        <Badge variant="outline" className="w-fit mb-2">
+          <Building className="w-3 h-3 mr-1" />
+          {scheme.ministry}
+        </Badge>
+        
+        {/* Scheme Name */}
+        <CardTitle 
+          className={cn(
+            "text-lg transition-all duration-300 pr-8",
+            isExpanded ? "" : "line-clamp-2",
+            showExpandButton && "cursor-pointer hover:text-primary"
+          )}
+          onClick={showExpandButton ? toggleExpand : undefined}
+        >
           {scheme.scheme_name}
         </CardTitle>
-
-        <CardDescription className="text-sm mt-2 line-clamp-2">
-          {truncateText(scheme.description, 100)}
+        
+        {/* Description */}
+        <CardDescription 
+          className={cn(
+            "mt-2 transition-all duration-300",
+            isExpanded ? "max-h-none" : "line-clamp-3",
+            showExpandButton && "cursor-pointer hover:text-foreground/80"
+          )}
+          onClick={showExpandButton ? toggleExpand : undefined}
+        >
+          {scheme.description}
         </CardDescription>
-      </CardHeader>
 
-      <CardContent className="pt-0">
-        {/* Key Features Icons */}
-        <div className="flex flex-wrap gap-3 mb-4">
-          {scheme.tags?.includes("Financial Assistance") && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <IndianRupee className="w-4 h-4 text-green-600" />
-              <span>Funding</span>
-            </div>
-          )}
-          {scheme.tags?.includes("Women") && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Users className="w-4 h-4 text-purple-600" />
-              <span>Women</span>
-            </div>
-          )}
-          {scheme.tags?.includes("Training") && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Calendar className="w-4 h-4 text-blue-600" />
-              <span>Training</span>
-            </div>
-          )}
-        </div>
-
-        {/* Key Benefits - if available */}
-        {scheme.benefits && (
-          <div className="mb-4 space-y-1">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Key Benefits
-            </p>
-            <div className="space-y-1">
-              {getKeyBenefits(scheme.benefits).slice(0, 2).map((benefit, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <CheckCircle className="w-3 h-3 text-green-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-muted-foreground line-clamp-1">{benefit}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* Expand/Collapse Button */}
+        {showExpandButton && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute top-2 right-2 h-7 w-7 p-0 hover:bg-primary/10"
+            onClick={toggleExpand}
+            aria-label={isExpanded ? "Show less" : "Show more"}
+          >
+            {isExpanded ? (
+              <ChevronUp className="h-4 w-4 text-primary" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </Button>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex gap-2 mt-4">
-          <Button
-            variant="default"
-            className="flex-1 btn-touch h-11 text-sm font-medium"
-            asChild
-          >
-            <Link href={`/schemes/${scheme.id || scheme.scheme_name.toLowerCase().replace(/\s+/g, '-')}`}>
-              View Details
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </Link>
-          </Button>
-
-          <Button
-            variant="outline"
-            className="btn-touch h-11 px-4"
-            aria-label="Check eligibility"
-          >
-            Check Eligibility
-          </Button>
-        </div>
-
-        {/* Tags */}
+        {/* Visual indicator for expandable content */}
+        {showExpandButton && !isExpanded && (
+          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent pointer-events-none" />
+        )}
+      </CardHeader>
+      
+      <CardContent className="flex-1 pt-0">
+        {/* Tags Display */}
         {scheme.tags && scheme.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-3">
-            {scheme.tags.slice(0, 4).map((tag, idx) => (
-              <Badge
-                key={idx}
+          <div className="flex flex-wrap gap-2">
+            {(isExpanded ? scheme.tags : scheme.tags.slice(0, 5)).map((tag, idx) => (
+              <Badge 
+                key={idx} 
                 variant="secondary"
-                className="text-xs px-2 py-0.5"
+                className="text-xs"
               >
                 {tag}
               </Badge>
             ))}
-            {scheme.tags.length > 4 && (
-              <Badge variant="secondary" className="text-xs px-2 py-0.5">
-                +{scheme.tags.length - 4} more
+            {!isExpanded && scheme.tags.length > 5 && (
+              <Badge 
+                variant="secondary" 
+                className="text-xs cursor-pointer hover:bg-secondary/80"
+                onClick={toggleExpand}
+              >
+                +{scheme.tags.length - 5} more
               </Badge>
             )}
           </div>
         )}
       </CardContent>
+      
+      <CardFooter className="pt-4">
+        {/* View Details Button */}
+        <Button 
+          className="w-full" 
+          onClick={handleViewDetails}
+        >
+          View Details
+          <ExternalLink className="w-4 h-4 ml-2" />
+        </Button>
+      </CardFooter>
     </Card>
   );
 }

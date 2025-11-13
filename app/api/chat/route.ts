@@ -1,17 +1,15 @@
 import { NextRequest } from 'next/server';
-import { streamText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { streamText, convertToModelMessages, type UIMessage } from 'ai';
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { conversationManager } from '@/services/chat/conversationManager';
 import { schemeDataService } from '@/services/schemes/schemeDataService';
 
 // Edge runtime for streaming
 export const runtime = 'edge';
 
-// Configure OpenRouter using OpenAI provider
-// OpenRouter's API is fully compatible with OpenAI's Chat Completions format
-const openrouter = createOpenAI({
+// Configure OpenRouter using the official provider
+const openrouter = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY || '',
-  baseURL: 'https://openrouter.ai/api/v1',
 });
 
 // Rate limiting store (in production, use Redis or similar)
@@ -60,14 +58,96 @@ function extractMessageContent(message: any): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log('Received request body:', JSON.stringify(body, null, 2));
+    console.log('[Chat API] Received request');
+    console.log('[Chat API] Body keys:', Object.keys(body));
+    console.log('[Chat API] Messages type:', typeof body.messages, 'Array?', Array.isArray(body.messages));
+    console.log('[Chat API] Messages length:', body.messages?.length);
+    
+    if (process.env.ENABLE_DEBUG_LOGS === 'true') {
+      console.log('[Chat API] Full body:', JSON.stringify(body, null, 2));
+    }
 
-    // AI SDK v5 sends messages array directly
-    const messages = body.messages || [];
-    const { sessionId, language = 'en', userProfile, model } = body;
+    // AI SDK v5 sends messages array directly as UIMessage[]
+    let uiMessages: UIMessage[] = body.messages || [];
+    const { sessionId, language = 'en', userProfile, model, conversationId } = body;
+    
+    // Log the first message structure for debugging
+    if (uiMessages.length > 0) {
+      console.log('[Chat API] First message structure:', JSON.stringify(uiMessages[0], null, 2));
+    }
+
+    // If we have a conversationId, load full conversation history from database
+    if (conversationId) {
+      console.log('[Chat API] Loading conversation history for:', conversationId);
+      
+      try {
+        // Import MessageService to load messages
+        const { MessageService } = await import('@/services/database/messageService');
+        const { createClient } = await import('@/lib/supabase/server');
+        
+        const supabase = await createClient();
+        const messageService = new MessageService(supabase);
+        
+        // Load all messages from database
+        const dbMessages = await messageService.getMessages(conversationId);
+        
+        // Convert database messages to UIMessage format
+        const historyMessages: UIMessage[] = dbMessages
+          .filter((msg: any) => {
+            // Skip messages with no content
+            if (!msg.content || (typeof msg.content === 'string' && msg.content.trim().length === 0)) {
+              console.warn('[Chat API] Skipping DB message with no content:', msg.id);
+              return false;
+            }
+            return true;
+          })
+          .map((msg: any) => {
+            let content = msg.content;
+            
+            // If content is an array, extract text from it
+            if (Array.isArray(content)) {
+              content = content
+                .filter((c: any) => c && (c.type === 'text' || c.text))
+                .map((c: any) => c.text || c.content || '')
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+            }
+            
+            // Ensure content is a string
+            if (typeof content !== 'string') {
+              content = String(content || '');
+            }
+            
+            // Return UIMessage format with parts array
+            return {
+              id: msg.id,
+              role: msg.role as 'user' | 'assistant',
+              parts: [{ type: 'text' as const, text: content }],
+              createdAt: new Date(msg.created_at),
+            } as UIMessage;
+          });
+        
+        // Get the last message from the client (the new user message)
+        const lastClientMessage = uiMessages.length > 0 ? uiMessages[uiMessages.length - 1] : null;
+        
+        if (lastClientMessage) {
+          // Combine: history + new message
+          uiMessages = [...historyMessages, lastClientMessage];
+        } else {
+          // Just use history
+          uiMessages = historyMessages;
+        }
+        
+        console.log('[Chat API] Loaded', historyMessages.length, 'messages from database');
+      } catch (err) {
+        console.error('[Chat API] Failed to load conversation history:', err);
+        // Continue with client messages if database load fails
+      }
+    }
 
     // Validate messages array
-    if (!Array.isArray(messages)) {
+    if (!Array.isArray(uiMessages)) {
       return new Response(
         JSON.stringify({ error: 'Invalid request: messages must be an array' }),
         {
@@ -96,12 +176,12 @@ export async function POST(request: NextRequest) {
     // Check if OpenRouter is configured
     if (!process.env.OPENROUTER_API_KEY) {
       // Fallback to mock response if not configured
-      const lastMessage = messages.length > 0 ? extractMessageContent(messages[messages.length - 1]) : '';
+      const lastMessage = uiMessages.length > 0 ? extractMessageContent(uiMessages[uiMessages.length - 1]) : '';
       return handleFallbackResponse(lastMessage, sessionId);
     }
 
     // Get the last user message using utility function
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = uiMessages[uiMessages.length - 1];
     const lastUserMessage = extractMessageContent(lastMsg);
 
     // Process chat with context from our data layer
@@ -112,46 +192,43 @@ export async function POST(request: NextRequest) {
       userProfile
     });
 
-    // Convert messages to core format for AI SDK v5
-    // Filter out any invalid messages and ensure proper string content format
-    const validMessages = messages
-      .filter((m: any) => {
-        // Skip the welcome message from the client
-        if (m.id === 'welcome' && m.role === 'assistant') {
-          return false;
-        }
-        return m && (m.role === 'user' || m.role === 'assistant');
-      })
-      .map((m: any) => {
-        // Extract text content using utility function
-        const content = extractMessageContent(m);
-
-        return {
-          role: m.role as 'user' | 'assistant',
-          content: content || 'Hello'  // Fallback if content extraction fails
-        };
-      })
-      .filter((m: any) => m.content && m.content.trim().length > 0);
+    // Filter out any invalid messages (like welcome messages)
+    const validUIMessages = uiMessages.filter((m: UIMessage) => {
+      // Skip the welcome message from the client
+      if (m.id === 'welcome' && m.role === 'assistant') {
+        return false;
+      }
+      
+      // Ensure message has required fields
+      if (!m || !m.role || !m.id) {
+        console.warn('[Chat API] Skipping message with missing required fields:', m);
+        return false;
+      }
+      
+      // Ensure message has content (either parts array or content string)
+      const hasParts = m.parts && Array.isArray(m.parts) && m.parts.length > 0;
+      const hasContent = typeof (m as any).content === 'string' && (m as any).content.length > 0;
+      
+      if (!hasParts && !hasContent) {
+        console.warn('[Chat API] Skipping message with no content:', m.id);
+        return false;
+      }
+      
+      return m.role === 'user' || m.role === 'assistant';
+    });
 
     // Log processed messages for debugging
+    console.log('[Chat API] Processing', validUIMessages.length, 'UI messages for AI');
     if (process.env.ENABLE_DEBUG_LOGS === 'true') {
-      console.log('Processed messages for OpenRouter:', JSON.stringify(validMessages, null, 2));
+      console.log('UI messages:', JSON.stringify(validUIMessages, null, 2));
     }
 
-    // Validate that all messages have string content
-    for (const msg of validMessages) {
-      if (typeof msg.content !== 'string') {
-        console.error('Invalid message format detected:', msg);
-        throw new Error('All messages must have string content');
-      }
-    }
-
-    // Use AI SDK v5 streamText with system parameter
-    // Using OpenAI provider with OpenRouter's baseURL for better compatibility
+    // Use AI SDK v5 streamText with convertToModelMessages
+    // This function handles all the message format conversions properly
     const result = streamText({
-      model: openrouter(model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'),
+      model: openrouter.chat(model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'),
       system: systemPrompt,
-      messages: validMessages,
+      messages: convertToModelMessages(validUIMessages),
       temperature: 0.7,
       async onFinish({ text, finishReason }) {
         // Update session with the conversation
@@ -172,7 +249,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Return streaming response with custom headers in UI message format
+    // Pass originalMessages to ensure proper message ID tracking on the client
     return result.toUIMessageStreamResponse({
+      originalMessages: validUIMessages,
       headers: {
         'X-Session-Id': session.id,
         'X-Model-Used': model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
@@ -201,9 +280,14 @@ export async function POST(request: NextRequest) {
     } else if (error.message?.includes('API key')) {
       errorMessage = 'API configuration error. Please contact support.';
       statusCode = 503;
-    } else if (error.message?.includes('Invalid message')) {
+    } else if (error.message?.includes('Invalid message') || error.message?.includes('invalid_type')) {
       errorMessage = 'Invalid message format. Please try rephrasing your question.';
       statusCode = 400;
+      console.error('[Chat API] Message validation error - check message format');
+    } else if (error.message?.includes('invalid_union')) {
+      errorMessage = 'Message format validation failed. Please try again.';
+      statusCode = 400;
+      console.error('[Chat API] Zod validation error - message schema mismatch');
     } else if (error.message) {
       errorMessage = error.message;
     }
@@ -272,7 +356,7 @@ function checkRateLimit(clientId: string): boolean {
  * Handle fallback response when OpenRouter is not configured
  */
 async function handleFallbackResponse(message: string, sessionId?: string) {
-  const schemes = schemeDataService.getAllSchemes();
+  const schemes = await schemeDataService.getAllSchemes();
 
   // Generate simple fallback response
   const fallbackResponse = `I apologize, but the AI service is not currently configured. However, I can tell you that we have ${schemes.length} government schemes available. To enable full AI capabilities, please configure your OPENROUTER_API_KEY environment variable.`;
