@@ -154,8 +154,30 @@ export function useConversationStoreDb(
     return [];
   }, [conversationState?.type, dbMessages.length, dbMessages]);
 
-  // AI SDK useChat hook - start fresh each time, don't pass initial messages
-  // The API will load conversation history from the database when conversationId is provided
+  // Convert display messages to UIMessage format for AI SDK
+  const initialMessages = React.useMemo(() => {
+    return displayMessages.map(msg => ({
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: 'text' as const, text: msg.content }],
+      createdAt: msg.createdAt,
+    }));
+  }, [displayMessages]);
+
+  // Track conversation ID changes to log when switching
+  const prevConversationIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentConversationId !== prevConversationIdRef.current) {
+      console.log('[useConversationStoreDb] Conversation changed:', {
+        from: prevConversationIdRef.current,
+        to: currentConversationId,
+        initialMessagesCount: initialMessages.length,
+      });
+      prevConversationIdRef.current = currentConversationId;
+    }
+  }, [currentConversationId, initialMessages.length]);
+
+  // AI SDK useChat hook - pass initialMessages to maintain conversation context
   const {
     messages: aiMessages,
     status,
@@ -171,8 +193,9 @@ export function useConversationStoreDb(
       userProfile: conversation?.user_id ? userProfile : undefined,
       model: conversationState?.data.model || 'openai/gpt-4o-mini',
     },
-    // Don't pass initialMessages - let the API load them from database
-    // This prevents validation errors from mismatched message formats
+    // Pass initialMessages so the AI SDK knows the conversation history
+    // This is crucial for maintaining context when returning to old conversations
+    initialMessages: initialMessages.length > 0 ? initialMessages : undefined,
     onFinish: async ({ message, messages }: { message: any; messages: any[] }) => {
       console.log('[onFinish] Called');
       console.log('[onFinish] Current conversation ID:', currentConversationId);
@@ -251,6 +274,9 @@ export function useConversationStoreDb(
             
             // Refresh messages to show the saved response
             await refreshMessages();
+            
+            // Refresh conversations list to update message count in sidebar (Requirement 4.2)
+            await refreshConversations();
           } else {
             console.error('[onFinish] No content extracted from message!');
             console.error('[onFinish] Message dump:', JSON.stringify(message, null, 2));
@@ -279,6 +305,10 @@ export function useConversationStoreDb(
 
   // Combine database messages with any streaming AI messages
   const messages: Message[] = React.useMemo(() => {
+    // When switching conversations, aiMessages might have stale data
+    // Only use aiMessages if they belong to the current conversation
+    const currentConvId = currentConversationId || 'temp';
+    
     // Convert display messages to UIMessage format
     const uiDisplayMessages: Message[] = displayMessages.map(msg => ({
       id: msg.id,
@@ -287,16 +317,45 @@ export function useConversationStoreDb(
       createdAt: msg.createdAt,
     }));
 
-    // If AI is currently responding, append only the streaming message
-    // Filter out any AI messages that are already in the database
-    if (aiMessages.length > 0 && isLoading) {
-      const dbMessageIds = new Set(uiDisplayMessages.map(m => m.id));
-      const newAiMessages = aiMessages.filter(msg => !dbMessageIds.has(msg.id));
-      return [...uiDisplayMessages, ...newAiMessages];
+    // If no DB messages and no AI messages, return empty
+    if (uiDisplayMessages.length === 0 && aiMessages.length === 0) {
+      return [];
     }
-    // Otherwise just show database messages
-    return uiDisplayMessages;
-  }, [displayMessages, aiMessages, isLoading]);
+
+    // If we only have DB messages, show them (conversation just loaded)
+    if (aiMessages.length === 0) {
+      return uiDisplayMessages;
+    }
+
+    // If we have AI messages but no DB messages, show AI messages (new conversation)
+    if (uiDisplayMessages.length === 0 && aiMessages.length > 0) {
+      return aiMessages;
+    }
+
+    // We have both - merge intelligently
+    // Create a set of DB message IDs and content for deduplication
+    const dbMessageIds = new Set(uiDisplayMessages.map(m => m.id));
+    const dbMessageContents = new Set(uiDisplayMessages.map(m => {
+      const text = m.parts?.find(p => p.type === 'text')?.text || '';
+      return `${m.role}:${text.trim()}`;
+    }));
+    
+    // Find AI messages that aren't in the database yet (new messages being sent/streamed)
+    const newAiMessages = aiMessages.filter(aiMsg => {
+      // Skip if already in DB by ID
+      if (dbMessageIds.has(aiMsg.id)) {
+        return false;
+      }
+      
+      // Skip if already in DB by content
+      const aiText = aiMsg.parts?.find(p => p.type === 'text')?.text || '';
+      const key = `${aiMsg.role}:${aiText.trim()}`;
+      return !dbMessageContents.has(key);
+    });
+    
+    // Combine: All DB messages (in order) + new AI messages (appended at end)
+    return [...uiDisplayMessages, ...newAiMessages];
+  }, [displayMessages, aiMessages, currentConversationId]);
 
   // Note: Messages are now passed directly to useChat via the 'messages' prop
   // instead of using setMessages in a useEffect. This prevents validation errors.
@@ -545,13 +604,30 @@ export function useConversationStoreDb(
       const success = await deleteConversationDb(conversationId);
 
       if (success) {
-        // If deleting current conversation, create a new persisted one
+        // Requirement 4.4: Remove conversation from sidebar when deleted
+        console.log('[useConversationStoreDb] Conversation deleted:', conversationId);
+        
+        // Requirement 4.5, 4.6: If deleting current conversation, auto-create or switch to another
         if (currentConversationId === conversationId) {
-          await createNewConversation('New Chat');
+          console.log('[useConversationStoreDb] Deleted conversation was active');
+          
+          // Check if there are other conversations available
+          const remainingConversations = conversations.filter(c => c.id !== conversationId);
+          
+          if (remainingConversations.length > 0) {
+            // Switch to the most recent conversation
+            const mostRecent = remainingConversations[0];
+            console.log('[useConversationStoreDb] Switching to most recent conversation:', mostRecent.id);
+            await switchConversation(mostRecent.id);
+          } else {
+            // No other conversations, create a new one
+            console.log('[useConversationStoreDb] No other conversations, creating new one');
+            await createNewConversation('New Chat');
+          }
         }
       }
     },
-    [currentConversationId, deleteConversationDb, createNewConversation]
+    [currentConversationId, conversations, deleteConversationDb, createNewConversation, switchConversation]
   );
 
   /**
@@ -614,24 +690,27 @@ export function useConversationStoreDb(
         // Clear input immediately for better UX
         setInput('');
 
-        // Save user message to database using the service directly
+        // Send to AI via AI SDK FIRST - this provides optimistic UI update
+        // The AI SDK will show the user message immediately
+        aiSendMessage({ text });
+
+        // Save user message to database in the background
         // This ensures we use the correct conversation ID
         const { MessageService } = await import('@/services/database/messageService');
         const messageService = new MessageService();
         
         console.log('[sendMessage] Calling messageService.addMessage with ID:', activeConversationId);
-        await messageService.addMessage(
+        messageService.addMessage(
           activeConversationId,
           'user',
           text
-        );
-        console.log('[sendMessage] Message added successfully!');
-
-        // Refresh messages to show the user message immediately
-        await refreshMessages();
-
-        // Send to AI via AI SDK
-        aiSendMessage({ text });
+        ).then(() => {
+          console.log('[sendMessage] Message added successfully!');
+          // Refresh conversations list to update message count and last_active_at in sidebar (Requirement 4.2, 4.3)
+          refreshConversations();
+        }).catch(err => {
+          console.error('[sendMessage] Failed to save message to DB:', err);
+        });
       } catch (err) {
         console.error('Failed to send message:', err);
         toast.error('Failed to send message');
@@ -639,7 +718,7 @@ export function useConversationStoreDb(
         isSendingRef.current = false;
       }
     },
-    [conversationState, currentConversationId, user, aiSendMessage, createNewConversation, generateTitle, refreshMessages]
+    [conversationState, currentConversationId, user, aiSendMessage, createNewConversation, generateTitle, refreshConversations]
   );
 
   return {

@@ -14,7 +14,7 @@ import { SchemeCard } from "@/components/chat/SchemeCard";
 import { useConversationStoreDb } from "@/hooks/useConversationStoreDb";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { useConversationTransition } from "@/hooks/useConversationTransition";
-import { announceToScreenReader } from "@/lib/utils";
+import { announceToScreenReader, getUserFriendlyErrorMessage, withRetry } from "@/lib/utils";
 import {
   Send,
   Mic,
@@ -27,6 +27,8 @@ import {
   FileText,
   TrendingUp,
   AlertCircle,
+  RefreshCw,
+  WifiOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -140,6 +142,11 @@ export function ChatInterfaceStream({
   const isCreatingNewRef = useRef(false);
   const lastProcessedTriggerRef = useRef(0);
 
+  // Track failed messages and preserve user input
+  const [failedMessageId, setFailedMessageId] = React.useState<string | null>(null);
+  const [preservedInput, setPreservedInput] = React.useState<string>('');
+  const [sendError, setSendError] = React.useState<Error | null>(null);
+
   // Conversation transition hook for smooth switching
   const {
     transitionState,
@@ -227,14 +234,17 @@ export function ChatInterfaceStream({
       transitionState === 'idle'
     ) {
       console.log('[ChatInterfaceStream] Switching to conversation:', selectedChatId);
+      console.log('[ChatInterfaceStream] Current conversation:', conversation?.id);
       lastSelectedChatIdRef.current = selectedChatId;
       
       // Use transition hook for smooth switching
       transitionSwitchConversation(selectedChatId, async () => {
+        // Requirement 4.4: Ensure message area loads correct history when switching
         await switchConversation(selectedChatId);
         console.log('[ChatInterfaceStream] Conversation switched successfully');
+        console.log('[ChatInterfaceStream] Messages loaded:', messages.length);
         
-        // Reset scroll position to bottom after switching
+        // Reset scroll position to bottom after switching (Requirement 6.4)
         setTimeout(() => {
           if (messagesEndRef.current) {
             messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
@@ -242,7 +252,7 @@ export function ChatInterfaceStream({
         }, 50);
       });
     }
-  }, [selectedChatId, conversation?.id, switchConversation, transitionState, transitionSwitchConversation, messagesEndRef]);
+  }, [selectedChatId, conversation?.id, switchConversation, transitionState, transitionSwitchConversation, messagesEndRef, messages.length]);
 
   // Ref for textarea to manage focus
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -265,15 +275,27 @@ export function ChatInterfaceStream({
     return () => cancelAnimationFrame(resizeHandle);
   }, [input]);
 
-  // Handle submit with offline mode support
-  const handleSubmit = useCallback((e?: React.FormEvent<HTMLFormElement>) => {
+  // Handle submit with offline mode support and error handling
+  const handleSubmit = useCallback(async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
 
     if (!input.trim() || isLoading) return;
 
+    // Clear any previous errors
+    setSendError(null);
+    setFailedMessageId(null);
+
+    // Preserve input in case of error
+    const messageToSend = input.trim();
+    setPreservedInput(messageToSend);
+
     // If offline, show warning but still try to send
     if (isOfflineMode) {
-      toast.info('You appear to be offline. Message may not send.');
+      toast.info(
+        isHindi 
+          ? 'आप ऑफ़लाइन प्रतीत होते हैं। संदेश नहीं भेजा जा सकता।'
+          : 'You appear to be offline. Message may not send.'
+      );
     }
 
     // Announce to screen readers
@@ -282,14 +304,45 @@ export function ChatInterfaceStream({
       'polite'
     );
 
-    // Send via conversation store (handles persistence)
-    sendMessage(input);
+    try {
+      // Send via conversation store with retry logic
+      await withRetry(
+        async () => {
+          await sendMessage(messageToSend);
+        },
+        3, // max retries
+        1000 // initial delay
+      );
+
+      // Success - clear preserved input
+      setPreservedInput('');
+      
+      // Announce success
+      announceToScreenReader(
+        isHindi ? 'संदेश भेजा गया' : 'Message sent',
+        'polite'
+      );
+    } catch (err) {
+      // Error - preserve input and show error
+      console.error('Failed to send message:', err);
+      setSendError(err instanceof Error ? err : new Error('Failed to send message'));
+      setInput(messageToSend); // Restore input
+      
+      // Announce error
+      announceToScreenReader(
+        isHindi ? 'संदेश भेजने में विफल' : 'Failed to send message',
+        'assertive'
+      );
+      
+      // Show toast with user-friendly message
+      toast.error(getUserFriendlyErrorMessage(err, language));
+    }
 
     // Keep focus on textarea for next message
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
-  }, [input, isOfflineMode, sendMessage, isHindi, isLoading]);
+  }, [input, isOfflineMode, sendMessage, isHindi, isLoading, language]);
 
   // Handle Enter key for sending messages
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -314,6 +367,23 @@ export function ChatInterfaceStream({
       }
     }, 0);
   }, [setInput]);
+
+  // Handle retry for failed messages
+  const handleRetry = useCallback(() => {
+    if (preservedInput) {
+      setInput(preservedInput);
+      setSendError(null);
+      setFailedMessageId(null);
+      
+      // Trigger form submission
+      setTimeout(() => {
+        const form = document.querySelector('form') as HTMLFormElement;
+        if (form) {
+          form.requestSubmit();
+        }
+      }, 0);
+    }
+  }, [preservedInput, setInput]);
 
   return (
     <div className="flex flex-col h-full bg-background relative">
@@ -396,12 +466,50 @@ export function ChatInterfaceStream({
                 />
               ))}
 
-              {/* Error display */}
-              {error && (
-                <Card className="bg-destructive/10 border-destructive/20 p-3">
-                  <p className="text-sm text-destructive">
-                    {error.message || 'Something went wrong. Please try again.'}
-                  </p>
+              {/* Inline error display with retry button */}
+              {(error || sendError) && (
+                <Card className="bg-destructive/10 border-destructive/20 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" aria-hidden="true" />
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-sm font-medium text-destructive mb-1">
+                          {isHindi ? 'संदेश भेजने में विफल' : 'Failed to send message'}
+                        </p>
+                        <p className="text-sm text-destructive/80">
+                          {getUserFriendlyErrorMessage(sendError || error, language)}
+                        </p>
+                      </div>
+                      
+                      {/* Retry button */}
+                      {preservedInput && (
+                        <Button
+                          onClick={handleRetry}
+                          size="sm"
+                          variant="outline"
+                          className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                          aria-label={isHindi ? 'संदेश पुनः भेजें' : 'Retry sending message'}
+                        >
+                          <RefreshCw className="w-4 h-4 mr-2" aria-hidden="true" />
+                          {isHindi ? 'पुनः प्रयास करें' : 'Retry'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Offline indicator in messages area */}
+              {isOfflineMode && messages.length > 0 && (
+                <Card className="bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-900 p-3">
+                  <div className="flex items-center gap-2">
+                    <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
+                    <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                      {isHindi 
+                        ? 'आप ऑफ़लाइन हैं। संदेश भेजने में समस्या हो सकती है।'
+                        : 'You are offline. Messages may not send.'}
+                    </p>
+                  </div>
                 </Card>
               )}
 

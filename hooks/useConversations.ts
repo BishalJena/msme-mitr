@@ -122,10 +122,12 @@ export function useConversations(
       // Fetch conversations
       const data = await conversationService.getConversations(user.id, includeArchived)
 
+      // Filter out conversations with 0 messages (Requirement 9.9)
+      // This prevents empty conversations from cluttering the sidebar
+      const filtered = data.filter(conv => conv.message_count > 0)
+
       // Sort: pinned first, then by last_active_at (Requirements 9.1, 9.2)
-      // Note: We no longer filter out conversations with 0 messages to allow
-      // newly created conversations to appear before the first message is sent
-      const sorted = data
+      const sorted = filtered
         .sort((a, b) => {
           // Pinned conversations first
           if (a.is_pinned && !b.is_pinned) return -1

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus,
   Search,
@@ -76,7 +77,8 @@ export function ChatSidebar({
   // Log current chat ID changes for debugging
   useEffect(() => {
     console.log('[ChatSidebar] Current chat ID changed to:', currentChatId);
-  }, [currentChatId]);
+    console.log('[ChatSidebar] Conversations:', conversations.map(c => ({ id: c.id, title: c.title, count: c.message_count })));
+  }, [currentChatId, conversations]);
 
   const formatTimestamp = (dateString: string) => {
     const date = new Date(dateString);
@@ -107,10 +109,18 @@ export function ChatSidebar({
   const handleDeleteConfirm = async () => {
     if (!conversationToDelete) return;
 
+    const isCurrentChat = conversationToDelete === currentChatId;
+    
     const success = await deleteConversationDb(conversationToDelete);
     if (success) {
-      // If deleting current chat, trigger new chat
-      if (conversationToDelete === currentChatId) {
+      // Requirement 4.4: Remove conversation from sidebar when deleted
+      console.log('[ChatSidebar] Conversation deleted:', conversationToDelete);
+      
+      // Requirement 4.5, 4.6: If deleting current chat, auto-create or switch to another conversation
+      if (isCurrentChat) {
+        console.log('[ChatSidebar] Deleted conversation was active, triggering new chat');
+        // The useConversationStoreDb hook will handle creating a new conversation
+        // or switching to an existing one
         onNewChat?.();
       }
     }
@@ -169,11 +179,22 @@ export function ChatSidebar({
         <ScrollArea className="h-full">
           <div className="space-y-1 pb-4 pr-2">
             {loading ? (
-            <div className="p-6 text-center text-muted-foreground">
-              <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
-              <p className="text-sm">
-                {isHindi ? "लोड हो रहा है..." : "Loading..."}
-              </p>
+            // Loading skeleton (Requirement 9.10)
+            <div className="space-y-2 px-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="rounded-lg p-3 space-y-2">
+                  <div className="flex items-start gap-3">
+                    <Skeleton className="w-5 h-5 rounded flex-shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-3/4" />
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-3 w-16" />
+                        <Skeleton className="h-3 w-12" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : error ? (
             <div className="p-6 text-center text-destructive">

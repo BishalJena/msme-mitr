@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
     // If we have a conversationId, load full conversation history from database
     if (conversationId) {
       console.log('[Chat API] Loading conversation history for:', conversationId);
+      console.log('[Chat API] Client sent', uiMessages.length, 'messages');
       
       try {
         // Import MessageService to load messages
@@ -90,6 +91,7 @@ export async function POST(request: NextRequest) {
         
         // Load all messages from database
         const dbMessages = await messageService.getMessages(conversationId);
+        console.log('[Chat API] Loaded', dbMessages.length, 'messages from database');
         
         // Convert database messages to UIMessage format
         const historyMessages: UIMessage[] = dbMessages
@@ -134,12 +136,12 @@ export async function POST(request: NextRequest) {
         if (lastClientMessage) {
           // Combine: history + new message
           uiMessages = [...historyMessages, lastClientMessage];
+          console.log('[Chat API] Combined history (', historyMessages.length, ') + new message (1) = ', uiMessages.length, 'total');
         } else {
           // Just use history
           uiMessages = historyMessages;
+          console.log('[Chat API] Using only history:', uiMessages.length, 'messages');
         }
-        
-        console.log('[Chat API] Loaded', historyMessages.length, 'messages from database');
       } catch (err) {
         console.error('[Chat API] Failed to load conversation history:', err);
         // Continue with client messages if database load fails
@@ -219,6 +221,7 @@ export async function POST(request: NextRequest) {
 
     // Log processed messages for debugging
     console.log('[Chat API] Processing', validUIMessages.length, 'UI messages for AI');
+    console.log('[Chat API] Message roles:', validUIMessages.map(m => `${m.role}:${m.id.substring(0, 8)}`).join(', '));
     if (process.env.ENABLE_DEBUG_LOGS === 'true') {
       console.log('UI messages:', JSON.stringify(validUIMessages, null, 2));
     }

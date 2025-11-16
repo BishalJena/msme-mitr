@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { MobileLayout } from "@/components/layouts/MobileLayout";
 import { ChatInterfaceStream } from "@/components/mobile/ChatInterfaceStream";
 import { ChatSidebar } from "@/components/mobile/ChatSidebar";
+import { ChatErrorBoundary } from "@/components/mobile/ChatErrorBoundary";
 
 export default function ChatPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Open by default on desktop
@@ -24,6 +25,7 @@ export default function ChatPage() {
   const handleConversationChange = useCallback((conversationId: string | null) => {
     console.log('[ChatPage] Conversation changed to:', conversationId);
     
+    // Requirement 4.1: Update sidebar highlight when conversation becomes active
     // Batch state updates to prevent multiple re-renders
     setCurrentChatId(prev => {
       if (prev === conversationId) return prev; // No change needed
@@ -82,14 +84,21 @@ export default function ChatPage() {
           />
         )}
 
-        {/* Main Chat Area */}
+        {/* Main Chat Area - Wrapped in Error Boundary */}
         <div className="flex-1 min-w-0 h-full overflow-hidden">
-          <ChatInterfaceStream
+          <ChatErrorBoundary 
             language="en"
-            onConversationChange={handleConversationChange}
-            newChatTrigger={newChatTrigger}
-            selectedChatId={currentChatId}
-          />
+            onError={(error, errorInfo) => {
+              console.error('Chat error caught by boundary:', error, errorInfo);
+            }}
+          >
+            <ChatInterfaceStream
+              language="en"
+              onConversationChange={handleConversationChange}
+              newChatTrigger={newChatTrigger}
+              selectedChatId={currentChatId}
+            />
+          </ChatErrorBoundary>
         </div>
       </div>
     </MobileLayout>
