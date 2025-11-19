@@ -102,20 +102,24 @@ export function StatCards({ summary, loading = false }: StatCardsProps) {
         const Icon = stat.icon
         
         return (
-          <Card key={stat.title}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {stat.title}
-              </CardTitle>
-              <Icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {formatNumber(stat.value)}
+          <Card key={stat.title} className="border-none shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">
+                    {stat.title}
+                  </p>
+                  <p className="text-3xl font-semibold">
+                    {formatNumber(stat.value)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {stat.description}
+                  </p>
+                </div>
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Icon className="h-5 w-5 text-primary" />
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stat.description}
-              </p>
             </CardContent>
           </Card>
         )

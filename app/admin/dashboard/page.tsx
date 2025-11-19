@@ -118,60 +118,63 @@ export default function AdminDashboardPage() {
   }, [])
 
   return (
-    <div className="p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Page Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Analytics Dashboard</h1>
-            <p className="text-muted-foreground mt-2">
-              View insights and metrics about user engagement with MSME schemes
-            </p>
+    <div className="min-h-screen flex flex-col">
+      {/* Header */}
+      <div className="border-b bg-background">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold">Analytics Dashboard</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                View insights and metrics about user engagement with MSME schemes
+              </p>
+            </div>
+            <ExportButton filters={filters} />
           </div>
-          <ExportButton filters={filters} />
         </div>
+      </div>
 
-        {/* Error Alert */}
-        {error && (
+      {/* Filters Bar */}
+      <div className="border-b bg-muted/30">
+        <div className="px-6 py-4">
+          <FilterPanel 
+            onFiltersChange={handleFiltersChange}
+            loading={loading}
+          />
+        </div>
+      </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="px-6 pt-4">
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-        )}
+        </div>
+      )}
 
-        {/* Layout Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Filters Sidebar */}
-          <div className="lg:col-span-1">
-            <FilterPanel 
-              onFiltersChange={handleFiltersChange}
-              loading={loading}
-            />
+      {/* Main Content - Full Width */}
+      <div className="flex-1 px-6 py-6 space-y-6">
+        {/* Stat Cards */}
+        <StatCards summary={summary} loading={loading} />
+
+        {/* Charts Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Scheme Popularity Chart */}
+          <div className="lg:col-span-2">
+            <SchemePopularityChart summary={summary} loading={loading} />
           </div>
 
-          {/* Main Content */}
-          <div className="lg:col-span-3 space-y-8">
-            {/* Stat Cards */}
-            <StatCards summary={summary} loading={loading} />
+          {/* Industry Distribution Chart */}
+          <IndustryDistributionChart summary={summary} loading={loading} />
 
-            {/* Charts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Scheme Popularity Chart */}
-              <div className="lg:col-span-2">
-                <SchemePopularityChart summary={summary} loading={loading} />
-              </div>
+          {/* Location Distribution Chart */}
+          <LocationDistributionChart summary={summary} loading={loading} />
 
-              {/* Industry Distribution Chart */}
-              <IndustryDistributionChart summary={summary} loading={loading} />
-
-              {/* Location Distribution Chart */}
-              <LocationDistributionChart summary={summary} loading={loading} />
-
-              {/* Conversation Trend Chart */}
-              <div className="lg:col-span-2">
-                <ConversationTrendChart summary={summary} loading={loading} />
-              </div>
-            </div>
+          {/* Conversation Trend Chart */}
+          <div className="lg:col-span-2">
+            <ConversationTrendChart summary={summary} loading={loading} />
           </div>
         </div>
       </div>

@@ -75,16 +75,52 @@ export class AnalyticsService {
         }
       }
 
-      // Build base query for user attributes
+      // Get total users count from user_profiles (actual registered users)
+      // If filters are applied, we'll count from user_attributes instead
+      let totalUsers = 0;
+      
+      if (filters && Object.keys(filters).length > 0) {
+        // When filters are applied, count users with extracted attributes
+        let userAttributesQuery = this.supabase
+          .from('user_attributes')
+          .select('user_id', { count: 'exact' });
+
+        userAttributesQuery = this.applyFiltersToQuery(userAttributesQuery, filters);
+
+        const { count, error: userError } = await userAttributesQuery;
+
+        if (userError) {
+          console.error('[AnalyticsService] Error fetching filtered user attributes:', userError);
+          throw userError;
+        }
+
+        totalUsers = count || 0;
+      } else {
+        // No filters - show total registered users
+        const { count, error: profileError } = await this.supabase
+          .from('user_profiles')
+          .select('id', { count: 'exact' })
+          .neq('role', 'admin')
+          .neq('role', 'super_admin');
+
+        if (profileError) {
+          console.error('[AnalyticsService] Error fetching user profiles:', profileError);
+          throw profileError;
+        }
+
+        totalUsers = count || 0;
+      }
+
+      // Build base query for user attributes (for location/industry data)
       let userAttributesQuery = this.supabase
         .from('user_attributes')
-        .select('*', { count: 'exact' });
+        .select('*');
 
       // Apply filters to user attributes query
       userAttributesQuery = this.applyFiltersToQuery(userAttributesQuery, filters);
 
       // Execute user attributes query
-      const { data: userAttributes, count: totalUsers, error: userError } = 
+      const { data: userAttributes, error: userError } = 
         await userAttributesQuery;
 
       if (userError) {
@@ -141,7 +177,7 @@ export class AnalyticsService {
       ]);
 
       const summary: AnalyticsSummary = {
-        totalUsers: totalUsers || 0,
+        totalUsers,
         totalConversations: totalConversations || 0,
         uniqueLocations,
         uniqueIndustries,
@@ -151,6 +187,14 @@ export class AnalyticsService {
         conversationTrend,
         languageDistribution
       };
+
+      console.log('[AnalyticsService] Summary generated:', {
+        totalUsers,
+        totalConversations: totalConversations || 0,
+        uniqueLocations,
+        uniqueIndustries,
+        topSchemesCount: topSchemes.length
+      });
 
       // Cache the result
       if (this.enableCache) {
@@ -584,14 +628,15 @@ export class AnalyticsService {
   async getSchemeInterests(
     filters?: AnalyticsFilters,
     pagination?: PaginationOptions,
-    sort?: SortOptions
+    sort?: SortOptions,
+    search?: string
   ): Promise<PaginatedResult<SchemeInterestWithDetails>> {
     try {
       const page = pagination?.page || 1;
       const pageSize = pagination?.pageSize || 20;
       const offset = (page - 1) * pageSize;
 
-      console.log('[AnalyticsService] Getting scheme interests:', { filters, pagination, sort });
+      console.log('[AnalyticsService] Getting scheme interests:', { filters, pagination, sort, search });
 
       // Build query with scheme details
       let query = this.supabase
@@ -609,6 +654,32 @@ export class AnalyticsService {
 
       // Apply filters
       query = this.applySchemeFiltersToQuery(query, filters);
+
+      // Apply search filter on scheme name (using ilike for case-insensitive search)
+      if (search) {
+        // Get scheme IDs that match the search
+        const { data: matchingSchemes, error: schemeError } = await this.supabase
+          .from('schemes')
+          .select('id')
+          .or(`scheme_name.ilike.%${search}%,ministry.ilike.%${search}%,category.ilike.%${search}%`);
+
+        if (schemeError) throw schemeError;
+
+        const schemeIds = matchingSchemes?.map((s: any) => s.id) || [];
+        if (schemeIds.length === 0) {
+          return {
+            data: [],
+            pagination: {
+              page,
+              pageSize,
+              totalCount: 0,
+              totalPages: 0
+            }
+          };
+        }
+
+        query = query.in('scheme_id', schemeIds);
+      }
 
       // If location/industry filters are provided, join with user_attributes
       if (filters?.location || filters?.industry || filters?.businessSize) {

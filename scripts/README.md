@@ -1,6 +1,6 @@
-# Migration Scripts
+# Scripts Directory
 
-This directory contains data migration scripts for the MSME Mitr application.
+This directory contains utility scripts for the MSME Mitr application, including data migration, admin user creation, and background job processing.
 
 ## Schemes Data Migration
 
@@ -164,4 +164,174 @@ After successful migration:
 2. Implement search and filtering functionality
 3. Add caching for frequently accessed schemes
 4. Consider adding a scheme refresh/update mechanism
+
+---
+
+## Admin User Creation
+
+### Overview
+
+The `create-admin-user.ts` script creates an admin user with elevated privileges for accessing the admin dashboard.
+
+### Usage
+
+```bash
+npm run create-admin
+```
+
+Or with custom email:
+
+```bash
+EMAIL=admin@example.com npm run create-admin
+```
+
+See the script file for more details.
+
+---
+
+## Extraction Job Processor
+
+### Overview
+
+The `process-extraction-jobs.ts` script is a background service that processes extraction jobs from the queue. It extracts structured business information from MSME conversations with multilingual support.
+
+### Quick Start
+
+**Run once (single batch):**
+```bash
+npm run process-jobs
+```
+
+**Run continuously (watch mode):**
+```bash
+npm run process-jobs:watch
+```
+
+### Features
+
+- Batch processing with configurable batch size
+- Priority-based job processing
+- Automatic retry with exponential backoff
+- Graceful shutdown handling
+- Real-time metrics and queue statistics
+- Comprehensive logging
+
+### Configuration
+
+Configure via environment variables:
+
+```env
+EXTRACTION_BATCH_SIZE=10           # Jobs per batch
+EXTRACTION_POLL_INTERVAL=10        # Polling interval (seconds)
+EXTRACTION_MAX_RETRIES=3           # Max retry attempts
+EXTRACTION_MODEL=openai/gpt-4o-mini
+EXTRACTION_CONFIDENCE_THRESHOLD=0.5
+OPENROUTER_API_KEY=your_api_key
+```
+
+### Documentation
+
+For detailed documentation, see:
+- **[EXTRACTION_JOB_PROCESSOR.md](./EXTRACTION_JOB_PROCESSOR.md)** - Complete usage guide, monitoring, and troubleshooting
+- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Production deployment options and best practices
+
+### Deployment Options
+
+1. **PM2** (Recommended) - Process manager with monitoring
+2. **Docker** - Containerized deployment
+3. **Systemd** - Linux service
+4. **Cron** - Periodic execution
+5. **Cloud Functions** - Serverless (Vercel, AWS Lambda)
+
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions.
+
+### Monitoring
+
+The processor provides:
+- Real-time processing metrics
+- Queue statistics
+- Success/failure rates
+- Performance metrics
+- Detailed logging
+
+Example output:
+```
+======================================================================
+PROCESSING METRICS
+======================================================================
+Uptime:           2h 15m 30s
+Cycles Completed: 135
+Total Processed:  450
+  ✓ Succeeded:    425
+  ✗ Failed:       15
+  ⊘ Skipped:      10
+Success Rate:     94.4%
+Avg Cycle Time:   3.45s
+Last Processed:   2025-01-17 14:30:45
+======================================================================
+```
+
+### Production Deployment
+
+For production, use PM2:
+
+```bash
+# Install PM2
+npm install -g pm2
+
+# Start processor
+pm2 start npm --name "msme-mitr-jobs" -- run process-jobs:watch
+
+# Save configuration
+pm2 save
+
+# Setup auto-start on boot
+pm2 startup
+```
+
+Monitor with:
+```bash
+pm2 status
+pm2 logs msme-mitr-jobs
+pm2 monit
+```
+
+---
+
+## Available Scripts
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| Migrate Schemes | `npm run migrate:schemes` | Migrate scheme data to database |
+| Verify Schemes | `npm run verify:schemes` | Verify scheme migration |
+| Create Admin | `npm run create-admin` | Create admin user |
+| Process Jobs | `npm run process-jobs` | Process extraction jobs (once) |
+| Process Jobs Watch | `npm run process-jobs:watch` | Process jobs continuously |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+**Missing environment variables:**
+- Ensure `.env.local` contains all required variables
+- Check Supabase credentials are correct
+
+**Database connection errors:**
+- Verify Supabase project is active
+- Check network connectivity
+- Ensure migrations are applied
+
+**Job processor not starting:**
+- Check OpenRouter API key is valid
+- Verify Node.js version (requires 18+)
+- Review logs for specific errors
+
+### Getting Help
+
+1. Check the relevant documentation file
+2. Review error logs
+3. Verify environment configuration
+4. Contact the development team
 

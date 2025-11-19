@@ -13,8 +13,6 @@ import {
   MoreVertical,
   Pin,
   Loader2,
-  LogOut,
-  User,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -36,6 +34,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useConversations } from "@/hooks/useConversations";
 import { useAuth } from "@/contexts/AuthContext";
+import { UserProfileMenu } from "@/components/shared/UserProfileMenu";
 import { toast } from "sonner";
 
 interface ChatSidebarProps {
@@ -56,7 +55,7 @@ export function ChatSidebar({
   onBrowseSchemes,
 }: ChatSidebarProps) {
   const router = useRouter();
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
   const isHindi = language === "hi";
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
@@ -143,16 +142,7 @@ export function ChatSidebar({
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      toast.success(isHindi ? "सफलतापूर्वक लॉग आउट" : "Logged out successfully");
-      router.push("/login");
-    } catch (error) {
-      console.error("Error signing out:", error);
-      toast.error(isHindi ? "लॉग आउट विफल" : "Failed to log out");
-    }
-  };
+
 
   return (
     <aside className="flex flex-col h-full bg-muted/30 border-r">
@@ -329,35 +319,10 @@ export function ChatSidebar({
 
       {/* Sidebar Footer */}
       <div className="p-4 border-t space-y-3">
-        {/* User Profile Section */}
+        {/* User Profile Menu */}
         {profile && (
-          <Link href="/profile">
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-2 h-auto py-2"
-            >
-              <User className="w-4 h-4 flex-shrink-0" />
-              <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {profile.full_name || profile.email}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {isHindi ? "प्रोफ़ाइल देखें" : "View Profile"}
-                </p>
-              </div>
-            </Button>
-          </Link>
+          <UserProfileMenu language={language as 'en' | 'hi'} align="start" fullWidth={true} />
         )}
-
-        {/* Logout Button */}
-        <Button
-          variant="outline"
-          className="w-full justify-start gap-2"
-          onClick={handleLogout}
-        >
-          <LogOut className="w-4 h-4" />
-          <span>{isHindi ? "लॉग आउट" : "Logout"}</span>
-        </Button>
 
         {/* Chat Count */}
         <p className="text-xs text-muted-foreground text-center pt-2">

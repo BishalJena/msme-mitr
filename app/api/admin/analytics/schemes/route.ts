@@ -20,6 +20,7 @@ import type { AnalyticsFilters } from '@/types/database';
  * Query Parameters:
  * - page: number (default: 1)
  * - pageSize: number (default: 20)
+ * - search: string (optional) - search by scheme name
  * - sortField: string (default: 'last_mentioned_at')
  * - sortDirection: 'asc' | 'desc' (default: 'desc')
  * - startDate: ISO date string (optional)
@@ -47,6 +48,9 @@ export async function GET(request: NextRequest) {
     // Pagination parameters
     const page = parseInt(searchParams.get('page') || '1', 10);
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
+    
+    // Search parameter
+    const search = searchParams.get('search');
 
     // Sorting parameters
     const sortField = searchParams.get('sortField') || 'last_mentioned_at';
@@ -95,14 +99,15 @@ export async function GET(request: NextRequest) {
       filters.languages = languagesParam.split(',').map(lang => lang.trim());
     }
 
-    console.log('[Admin API] Getting scheme interests:', { page, pageSize, sortField, sortDirection, filters });
+    console.log('[Admin API] Getting scheme interests:', { page, pageSize, search, sortField, sortDirection, filters });
 
     // Get scheme interests
     const analyticsService = new AnalyticsService({ supabaseClient: supabase });
     const result = await analyticsService.getSchemeInterests(
       filters,
       { page, pageSize },
-      { field: sortField, direction: sortDirection }
+      { field: sortField, direction: sortDirection },
+      search || undefined
     );
 
     return NextResponse.json({

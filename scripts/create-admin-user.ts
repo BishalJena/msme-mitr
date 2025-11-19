@@ -21,6 +21,14 @@
  *   SUPABASE_SERVICE_ROLE_KEY - Service role key (required for admin operations)
  */
 
+// Load environment variables from .env.local
+import { config } from 'dotenv'
+import { resolve } from 'path'
+
+// Try to load .env.local first, then .env
+config({ path: resolve(process.cwd(), '.env.local') })
+config({ path: resolve(process.cwd(), '.env') })
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import type { Database, UserProfile, UserProfileInsert, UserProfileUpdate } from '@/types/database'
 

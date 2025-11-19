@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import type { UserProfile, UserProfileUpdate } from '@/types/database'
@@ -33,30 +33,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
 
   useEffect(() => {
+    let mounted = true
+
     // Get initial session
     const initializeAuth = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession()
+        const { data: { session } } = await supabase.auth.getSession()
         
-        if (error) {
-          console.error('Error getting session:', error)
-          setLoading(false)
-          return
-        }
-
+        if (!mounted) return
+        
         setUser(session?.user ?? null)
         
         if (session?.user) {
-          await loadProfile(session.user.id)
-        } else {
-          setLoading(false)
+          // Load profile in background, don't wait
+          loadProfile(session.user.id).catch(console.error)
         }
       } catch (error) {
-        console.error('Error initializing auth:', error)
-        setLoading(false)
+        console.error('[AuthContext] Error initializing auth:', error)
+      } finally {
+        // Always set loading to false after checking session
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 
@@ -66,20 +67,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event: string, session: Session | null) => {
+      if (!mounted) return
+      
       setUser(session?.user ?? null)
       
       if (session?.user) {
-        await loadProfile(session.user.id)
+        loadProfile(session.user.id).catch(console.error)
       } else {
         setProfile(null)
-        setLoading(false)
       }
     })
 
     return () => {
+      mounted = false
       subscription.unsubscribe()
     }
-  }, [])
+  }, [supabase])
 
   /**
    * Load user profile from database
@@ -93,16 +96,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
 
       if (error) {
-        console.error('Error loading profile:', error)
+        console.error('[AuthContext] Error loading profile:', error.message)
+        // Set null profile on error, app will continue
         setProfile(null)
-      } else if (data) {
-        setProfile(data)
+        return
+      }
+
+      if (data) {
+        setProfile(data as UserProfile)
       }
     } catch (error) {
-      console.error('Error loading profile:', error)
+      console.error('[AuthContext] Exception loading profile:', error)
       setProfile(null)
-    } finally {
-      setLoading(false)
     }
   }
 

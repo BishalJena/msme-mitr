@@ -35,32 +35,42 @@ export default function AdminLayout({
   const [isAuthorized, setIsAuthorized] = useState(false)
 
   useEffect(() => {
+    console.log('[AdminLayout] Auth state:', { loading, hasUser: !!user, hasProfile: !!profile, role: profile?.role })
+
     // Wait for auth to load
-    if (loading) return
+    if (loading) {
+      console.log('[AdminLayout] Still loading auth...')
+      return
+    }
 
     // Requirement 3.1, 3.3: Check if user is authenticated
     if (!user) {
-      // Redirect to login if not authenticated
+      console.log('[AdminLayout] No user, redirecting to login')
       router.push('/login')
       return
     }
 
     // Requirement 3.2, 3.4: Check if user has admin role
     if (!profile) {
-      // Profile not loaded yet, wait
+      console.log('[AdminLayout] User exists but profile not loaded yet')
+      // This should only happen if profile query failed
+      // In this case, deny access for security
+      setIsAuthorized(false)
       return
     }
 
     const isAdmin = profile.role === 'admin' || profile.role === 'super_admin'
-    
+    console.log('[AdminLayout] Authorization check:', { role: profile.role, isAdmin })
+
     if (!isAdmin) {
+      console.log('[AdminLayout] User is not admin, showing 403')
       // User is authenticated but not an admin
-      // Show 403 error (handled by rendering 403 message)
       setIsAuthorized(false)
       return
     }
 
     // User is authenticated and has admin role
+    console.log('[AdminLayout] User authorized as admin')
     setIsAuthorized(true)
   }, [user, profile, loading, router])
 
@@ -121,21 +131,17 @@ export default function AdminLayout({
     )
   }
 
-  // Render admin layout with navigation sidebar
+  // Render admin layout with top navigation
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Sidebar Navigation */}
-      <aside className="w-64 flex-shrink-0 hidden md:block">
-        <div className="h-full fixed w-64">
-          <AdminNav />
-        </div>
-      </aside>
+    <div className="min-h-screen bg-background">
+      {/* Top Navigation */}
+      <header className="border-b bg-background sticky top-0 z-50">
+        <AdminNav />
+      </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 md:ml-0">
-        <div className="h-full">
-          {children}
-        </div>
+      <main className="w-full">
+        {children}
       </main>
     </div>
   )

@@ -510,6 +510,11 @@ export interface UserAttributeUpdate {
   updated_at?: string
 }
 
+// User attribute with user email (for joined queries)
+export interface UserAttributeWithUser extends UserAttribute {
+  user_email: string | null
+}
+
 // ============================================================================
 // Scheme Interest Types (Analytics)
 // ============================================================================

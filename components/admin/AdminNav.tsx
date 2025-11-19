@@ -16,18 +16,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useAuth } from '@/contexts/AuthContext'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { UserProfileMenu } from '@/components/shared/UserProfileMenu'
 import { 
   LayoutDashboard, 
   Users, 
   FileText, 
-  Settings,
-  LogOut
+  Settings
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 
 // ============================================================================
 // Types
@@ -72,7 +67,6 @@ const navItems: NavItem[] = [
 
 export function AdminNav() {
   const pathname = usePathname()
-  const { profile, signOut } = useAuth()
 
   /**
    * Check if a nav item is active
@@ -81,117 +75,45 @@ export function AdminNav() {
     return pathname === href || pathname?.startsWith(`${href}/`)
   }
 
-  /**
-   * Get user initials for avatar
-   */
-  const getUserInitials = () => {
-    if (!profile?.full_name) return 'AD'
-    
-    const names = profile.full_name.split(' ')
-    if (names.length >= 2) {
-      return `${names[0][0]}${names[1][0]}`.toUpperCase()
-    }
-    return profile.full_name.substring(0, 2).toUpperCase()
-  }
 
-  /**
-   * Get role badge variant
-   */
-  const getRoleBadgeVariant = () => {
-    if (profile?.role === 'super_admin') return 'default'
-    return 'secondary'
-  }
-
-  /**
-   * Get role display text
-   */
-  const getRoleText = () => {
-    if (profile?.role === 'super_admin') return 'Super Admin'
-    if (profile?.role === 'admin') return 'Admin'
-    return 'User'
-  }
-
-  /**
-   * Handle logout
-   */
-  const handleLogout = async () => {
-    try {
-      await signOut()
-      window.location.href = '/login'
-    } catch (error) {
-      console.error('Error signing out:', error)
-    }
-  }
 
   return (
-    <div className="flex flex-col h-full bg-card border-r">
-      {/* Header */}
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-primary">MSME Mitr</h1>
-        <p className="text-sm text-muted-foreground mt-1">Admin Dashboard</p>
-      </div>
-
-      <Separator />
-
-      {/* Navigation Links */}
-      <nav className="flex-1 p-4 space-y-2">
-        {navItems.map((item) => {
-          const Icon = item.icon
-          const active = isActive(item.href)
-          
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`
-                flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
-                ${active 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                }
-              `}
-            >
-              <Icon className="h-5 w-5" />
-              <span className="font-medium">{item.name}</span>
-            </Link>
-          )
-        })}
-      </nav>
-
-      <Separator />
-
-      {/* User Profile Section */}
-      <div className="p-4 space-y-4">
-        {/* User Info */}
-        <div className="flex items-center gap-3">
-          <Avatar>
-            <AvatarFallback className="bg-primary text-primary-foreground">
-              {getUserInitials()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">
-              {profile?.full_name || 'Admin User'}
-            </p>
-            <Badge 
-              variant={getRoleBadgeVariant()} 
-              className="mt-1 text-xs"
-            >
-              {getRoleText()}
-            </Badge>
-          </div>
+    <div className="flex items-center justify-between px-6 py-3 bg-background">
+      {/* Logo and Brand */}
+      <div className="flex items-center gap-8">
+        <div>
+          <h1 className="text-xl font-bold text-primary">MSME Mitr</h1>
+          <p className="text-xs text-muted-foreground">Admin Dashboard</p>
         </div>
 
-        {/* Logout Button */}
-        <Button
-          variant="outline"
-          className="w-full justify-start gap-2"
-          onClick={handleLogout}
-        >
-          <LogOut className="h-4 w-4" />
-          Logout
-        </Button>
+        {/* Navigation Links */}
+        <nav className="flex items-center gap-1">
+          {navItems.map((item) => {
+            const Icon = item.icon
+            const active = isActive(item.href)
+            
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-md transition-colors text-sm
+                  ${active 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  }
+                `}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="font-medium">{item.name}</span>
+              </Link>
+            )
+          })}
+        </nav>
       </div>
+
+      {/* User Profile Menu */}
+      <UserProfileMenu showRole={true} align="end" />
     </div>
   )
 }

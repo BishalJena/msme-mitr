@@ -53,10 +53,10 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
   // Filter state
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
-  const [location, setLocation] = useState('')
-  const [industry, setIndustry] = useState('')
-  const [schemeId, setSchemeId] = useState('')
-  const [businessSize, setBusinessSize] = useState<'Micro' | 'Small' | 'Medium' | ''>('')
+  const [location, setLocation] = useState('all')
+  const [industry, setIndustry] = useState('all')
+  const [schemeId, setSchemeId] = useState('all')
+  const [businessSize, setBusinessSize] = useState<'Micro' | 'Small' | 'Medium' | 'all' | ''>('all')
 
   // Filter options state
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
@@ -70,29 +70,35 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
    * Fetch filter options from API
    */
   useEffect(() => {
+    let mounted = true
+
     const fetchFilterOptions = async () => {
       try {
         setLoadingOptions(true)
+
+        console.log('[FilterPanel] Fetching filter options...')
 
         // Fetch locations, industries, and schemes
         // For now, we'll fetch from the summary endpoint without filters
         const response = await fetch('/api/admin/analytics/summary')
         
         if (!response.ok) {
+          console.error('[FilterPanel] Failed to fetch summary:', response.status)
           throw new Error('Failed to fetch filter options')
         }
 
         const result = await response.json()
+        console.log('[FilterPanel] Summary result:', result)
         
-        if (result.success && result.data) {
+        if (mounted && result.success && result.data) {
           const { locationDistribution, industryDistribution } = result.data
 
           // Extract unique locations and industries
-          const locations = locationDistribution
+          const locations = (locationDistribution || [])
             .map((item: any) => item.location)
             .filter((loc: string) => loc && loc !== 'Unknown')
           
-          const industries = industryDistribution
+          const industries = (industryDistribution || [])
             .map((item: any) => item.industry)
             .filter((ind: string) => ind && ind !== 'Unknown')
 
@@ -114,20 +120,36 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
             }
           }
 
-          setFilterOptions({
-            locations,
-            industries,
-            schemes
-          })
+          if (mounted) {
+            setFilterOptions({
+              locations,
+              industries,
+              schemes
+            })
+          }
         }
       } catch (error) {
-        console.error('Error fetching filter options:', error)
+        console.error('[FilterPanel] Error fetching filter options:', error)
+        // Set empty options on error so the component still renders
+        if (mounted) {
+          setFilterOptions({
+            locations: [],
+            industries: [],
+            schemes: []
+          })
+        }
       } finally {
-        setLoadingOptions(false)
+        if (mounted) {
+          setLoadingOptions(false)
+        }
       }
     }
 
     fetchFilterOptions()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   /**
@@ -141,23 +163,23 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
       filters.dateRange = { startDate, endDate }
     }
 
-    // Location
-    if (location) {
+    // Location (skip if "all")
+    if (location && location !== 'all') {
       filters.location = location
     }
 
-    // Industry
-    if (industry) {
+    // Industry (skip if "all")
+    if (industry && industry !== 'all') {
       filters.industry = industry
     }
 
-    // Scheme
-    if (schemeId) {
+    // Scheme (skip if "all")
+    if (schemeId && schemeId !== 'all') {
       filters.schemeId = schemeId
     }
 
-    // Business size
-    if (businessSize) {
+    // Business size (skip if "all")
+    if (businessSize && businessSize !== 'all') {
       filters.businessSize = businessSize
     }
 
@@ -170,10 +192,10 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
   const handleClearFilters = () => {
     setStartDate('')
     setEndDate('')
-    setLocation('')
-    setIndustry('')
-    setSchemeId('')
-    setBusinessSize('')
+    setLocation('all')
+    setIndustry('all')
+    setSchemeId('all')
+    setBusinessSize('all')
     onFiltersChange({})
   }
 
@@ -185,144 +207,141 @@ export function FilterPanel({ onFiltersChange, loading = false }: FilterPanelPro
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Filter className="h-5 w-5" />
-          Filters
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Date Range */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="startDate">Start Date</Label>
-            <Input
-              id="startDate"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="endDate">End Date</Label>
-            <Input
-              id="endDate"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-        </div>
-
-        {/* Location Filter */}
-        <div className="space-y-2">
-          <Label htmlFor="location">Location</Label>
-          <Select
-            value={location}
-            onValueChange={setLocation}
-            disabled={loading || loadingOptions}
-          >
-            <SelectTrigger id="location">
-              <SelectValue placeholder="Select location" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Locations</SelectItem>
-              {filterOptions.locations.map((loc) => (
-                <SelectItem key={loc} value={loc}>
-                  {loc}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Industry Filter */}
-        <div className="space-y-2">
-          <Label htmlFor="industry">Industry</Label>
-          <Select
-            value={industry}
-            onValueChange={setIndustry}
-            disabled={loading || loadingOptions}
-          >
-            <SelectTrigger id="industry">
-              <SelectValue placeholder="Select industry" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Industries</SelectItem>
-              {filterOptions.industries.map((ind) => (
-                <SelectItem key={ind} value={ind}>
-                  {ind}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Scheme Filter */}
-        <div className="space-y-2">
-          <Label htmlFor="scheme">Scheme</Label>
-          <Select
-            value={schemeId}
-            onValueChange={setSchemeId}
-            disabled={loading || loadingOptions}
-          >
-            <SelectTrigger id="scheme">
-              <SelectValue placeholder="Select scheme" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Schemes</SelectItem>
-              {filterOptions.schemes.map((scheme) => (
-                <SelectItem key={scheme.id} value={scheme.id}>
-                  {scheme.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Business Size Filter */}
-        <div className="space-y-2">
-          <Label htmlFor="businessSize">Business Size</Label>
-          <Select
-            value={businessSize}
-            onValueChange={(value) => setBusinessSize(value as any)}
+    <div className="flex flex-wrap items-end gap-3">
+      {/* Date Range */}
+      <div className="flex gap-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="startDate" className="text-xs">Start Date</Label>
+          <Input
+            id="startDate"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
             disabled={loading}
-          >
-            <SelectTrigger id="businessSize">
-              <SelectValue placeholder="Select business size" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Sizes</SelectItem>
-              <SelectItem value="Micro">Micro</SelectItem>
-              <SelectItem value="Small">Small</SelectItem>
-              <SelectItem value="Medium">Medium</SelectItem>
-            </SelectContent>
-          </Select>
+            className="h-9 w-[140px]"
+          />
         </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-2 pt-2">
-          <Button
-            onClick={handleApplyFilters}
+        <div className="space-y-1.5">
+          <Label htmlFor="endDate" className="text-xs">End Date</Label>
+          <Input
+            id="endDate"
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
             disabled={loading}
-            className="flex-1"
-          >
-            Apply Filters
-          </Button>
-          <Button
-            onClick={handleClearFilters}
-            variant="outline"
-            disabled={loading || !hasActiveFilters()}
-            className="flex-1"
-          >
-            <X className="h-4 w-4 mr-2" />
-            Clear
-          </Button>
+            className="h-9 w-[140px]"
+          />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Location Filter */}
+      <div className="space-y-1.5">
+        <Label htmlFor="location" className="text-xs">Location</Label>
+        <Select
+          value={location}
+          onValueChange={setLocation}
+          disabled={loading || loadingOptions}
+        >
+          <SelectTrigger id="location" className="h-9 w-[160px]">
+            <SelectValue placeholder="All Locations" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Locations</SelectItem>
+            {filterOptions.locations.map((loc) => (
+              <SelectItem key={loc} value={loc}>
+                {loc}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Industry Filter */}
+      <div className="space-y-1.5">
+        <Label htmlFor="industry" className="text-xs">Industry</Label>
+        <Select
+          value={industry}
+          onValueChange={setIndustry}
+          disabled={loading || loadingOptions}
+        >
+          <SelectTrigger id="industry" className="h-9 w-[160px]">
+            <SelectValue placeholder="All Industries" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Industries</SelectItem>
+            {filterOptions.industries.map((ind) => (
+              <SelectItem key={ind} value={ind}>
+                {ind}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Scheme Filter */}
+      <div className="space-y-1.5">
+        <Label htmlFor="scheme" className="text-xs">Scheme</Label>
+        <Select
+          value={schemeId}
+          onValueChange={setSchemeId}
+          disabled={loading || loadingOptions}
+        >
+          <SelectTrigger id="scheme" className="h-9 w-[180px]">
+            <SelectValue placeholder="All Schemes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Schemes</SelectItem>
+            {filterOptions.schemes.map((scheme) => (
+              <SelectItem key={scheme.id} value={scheme.id}>
+                {scheme.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Business Size Filter */}
+      <div className="space-y-1.5">
+        <Label htmlFor="businessSize" className="text-xs">Business Size</Label>
+        <Select
+          value={businessSize}
+          onValueChange={(value) => setBusinessSize(value as any)}
+          disabled={loading}
+        >
+          <SelectTrigger id="businessSize" className="h-9 w-[140px]">
+            <SelectValue placeholder="All Sizes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sizes</SelectItem>
+            <SelectItem value="Micro">Micro</SelectItem>
+            <SelectItem value="Small">Small</SelectItem>
+            <SelectItem value="Medium">Medium</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-2 ml-auto">
+        <Button
+          onClick={handleApplyFilters}
+          disabled={loading}
+          size="sm"
+          className="h-9"
+        >
+          <Filter className="h-3.5 w-3.5 mr-1.5" />
+          Apply
+        </Button>
+        <Button
+          onClick={handleClearFilters}
+          variant="outline"
+          size="sm"
+          disabled={loading || !hasActiveFilters()}
+          className="h-9"
+        >
+          <X className="h-3.5 w-3.5 mr-1.5" />
+          Clear
+        </Button>
+      </div>
+    </div>
   )
 }
